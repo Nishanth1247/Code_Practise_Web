@@ -3,10 +3,11 @@ const path = require('path');
 const mysql = require('mysql2/promise');
 const config = require('../src/config/env');
 const { getSslConfig } = require('../src/config/db');
+const { runIdempotentMigrations } = require('../src/utils/schemaMigration');
 
 async function runMigrations() {
   console.log('--- Starting Database Migration ---');
-  console.log(`Connecting to MySQL host: ${config.db.host}:${config.db.port} as user: ${config.db.user}`);
+  console.log(`Target: MySQL host ${config.db.host}:${config.db.port}, Database: '${config.db.database}'`);
 
   let connection;
   try {
@@ -15,6 +16,7 @@ async function runMigrations() {
       port: config.db.port,
       user: config.db.user,
       password: config.db.password,
+      database: config.db.database,
       multipleStatements: true,
       timezone: '+00:00'
     };
@@ -22,110 +24,66 @@ async function runMigrations() {
     const ssl = getSslConfig();
     if (ssl) {
       connConfig.ssl = ssl;
+      console.log('[INFO] SSL / TLS connection enabled for database.');
     }
 
-    // Connect without specifying database first to create database if not exists
-    connection = await mysql.createConnection(connConfig);
-
-    console.log('[OK] Connected to MySQL server.');
-
-    // Ensure database exists
-    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${config.db.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
-    await connection.query(`USE \`${config.db.database}\`;`);
-    console.log(`[OK] Selected database '${config.db.database}'.`);
-
-    // Read schema.sql
-    const schemaPath = path.resolve(__dirname, '../../database/schema.sql');
-    if (!fs.existsSync(schemaPath)) {
-      throw new Error(`Schema file not found at: ${schemaPath}`);
-    }
-
-    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-
-    // Split and execute SQL statements
-    console.log('[INFO] Applying schema tables...');
-    await connection.query(schemaSql);
-
-    // Safe migration: check existing questions table columns and indexes
+    // Attempt direct connection to the target database (recommended for Aiven & cloud MySQL)
     try {
-      const [colRows] = await connection.query(`
-        SELECT COLUMN_NAME, IS_NULLABLE
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'questions'
-      `, [config.db.database]);
+      connection = await mysql.createConnection(connConfig);
+      console.log(`[OK] Connected directly to database '${config.db.database}'.`);
+    } catch (directConnErr) {
+      if (directConnErr.code === 'ER_BAD_DB_ERROR') {
+        // Target database does not exist yet (local dev environment)
+        console.log(`[INFO] Database '${config.db.database}' does not exist. Connecting to server to create it...`);
+        const serverConnConfig = { ...connConfig };
+        delete serverConnConfig.database;
 
-      const colNames = colRows.map(r => r.COLUMN_NAME);
-
-      if (colNames.includes('difficulty')) {
-        console.log('[MIGRATION] Making difficulty column nullable for backward compatibility...');
-        await connection.query(`ALTER TABLE \`questions\` MODIFY COLUMN \`difficulty\` VARCHAR(50) NULL DEFAULT NULL;`);
+        connection = await mysql.createConnection(serverConnConfig);
+        await connection.query(
+          `CREATE DATABASE IF NOT EXISTS \`${config.db.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
+        );
+        await connection.query(`USE \`${config.db.database}\`;`);
+        console.log(`[OK] Created and selected database '${config.db.database}'.`);
+      } else {
+        throw directConnErr;
       }
+    }
 
-      if (colNames.includes('topic')) {
-        console.log('[MIGRATION] Making topic column nullable for backward compatibility...');
-        await connection.query(`ALTER TABLE \`questions\` MODIFY COLUMN \`topic\` VARCHAR(100) NULL DEFAULT NULL;`);
-      }
+    // 1. Read and apply schema.sql
+    const schemaPath = path.resolve(__dirname, '../../database/schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      let schemaSql = fs.readFileSync(schemaPath, 'utf8');
 
-      const [indexRows] = await connection.query(`
-        SELECT INDEX_NAME
-        FROM INFORMATION_SCHEMA.STATISTICS
-        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'questions' AND INDEX_NAME = 'idx_questions_difficulty'
-      `, [config.db.database]);
+      // Strip any hardcoded CREATE DATABASE or USE statements to prevent access denied on Aiven
+      schemaSql = schemaSql
+        .replace(/CREATE\s+DATABASE\s+[^;]+;/gi, '')
+        .replace(/USE\s+[^;]+;/gi, '');
 
-      if (indexRows.length > 0) {
-        console.log('[MIGRATION] Dropping idx_questions_difficulty index...');
-        await connection.query(`ALTER TABLE \`questions\` DROP INDEX \`idx_questions_difficulty\`;`);
-      }
+      console.log('[INFO] Ensuring core schema tables exist (CREATE TABLE IF NOT EXISTS)...');
+      await connection.query(schemaSql);
+      console.log('[OK] Core schema tables verified.');
+    } else {
+      console.warn(`[WARN] Schema file not found at ${schemaPath}; proceeding to column migrations.`);
+    }
 
-      // Check levels table for enabled column
-      const [levelColRows] = await connection.query(`
-        SELECT COLUMN_NAME
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'levels' AND COLUMN_NAME = 'enabled'
-      `, [config.db.database]);
+    // 2. Run idempotent column and index migrations (users.status, questions.status, etc.)
+    console.log('[INFO] Running safe idempotent column and index migrations...');
+    const result = await runIdempotentMigrations(connection, config.db.database);
 
-      if (levelColRows.length === 0) {
-        console.log('[MIGRATION] Adding enabled column to levels table...');
-        await connection.query(`ALTER TABLE \`levels\` ADD COLUMN \`enabled\` BOOLEAN NOT NULL DEFAULT TRUE;`);
-        console.log('[MIGRATION] Added enabled column to levels table successfully.');
-      }
-
-      // Check users table for status column
-      const [userStatusCols] = await connection.query(`
-        SELECT COLUMN_NAME
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND COLUMN_NAME = 'status'
-      `, [config.db.database]);
-
-      if (userStatusCols.length === 0) {
-        console.log('[MIGRATION] Adding status column to users table...');
-        await connection.query(`ALTER TABLE \`users\` ADD COLUMN \`status\` ENUM('ACTIVE', 'DELETED') NOT NULL DEFAULT 'ACTIVE';`);
-        console.log('[MIGRATION] Added status column to users table successfully.');
-      }
-
-      // Check question_reports table for reason column type
-      const [reportReasonCols] = await connection.query(`
-        SELECT COLUMN_TYPE
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'question_reports' AND COLUMN_NAME = 'reason'
-      `, [config.db.database]);
-
-      if (reportReasonCols.length > 0 && reportReasonCols[0].COLUMN_TYPE.startsWith('enum')) {
-        console.log('[MIGRATION] Modifying question_reports.reason to VARCHAR(100)...');
-        await connection.query(`ALTER TABLE \`question_reports\` MODIFY COLUMN \`reason\` VARCHAR(100) NOT NULL;`);
-        console.log('[MIGRATION] Modified question_reports.reason to VARCHAR(100) successfully.');
-      }
-    } catch (migErr) {
-      console.warn('[MIGRATION NOTICE] Column compatibility check note:', migErr.message);
+    if (result.changes.length > 0) {
+      console.log(`[OK] Applied ${result.changes.length} schema update(s):`);
+      result.changes.forEach((change) => console.log(`  - ${change}`));
+    } else {
+      console.log(`[OK] All columns, statuses, indexes, and tables are fully up to date.`);
     }
 
     console.log('--- Database Migration Completed Successfully! ---');
   } catch (err) {
     console.error('Migration failed:', err.message);
     if (err.code === 'ER_ACCESS_DENIED_ERROR') {
-      console.error('\nAccess denied for MySQL user. Please check your DB_USER and DB_PASSWORD in server/.env');
+      console.error('\nAccess denied. Please check DB_USER, DB_PASSWORD, and DB_SSL configuration in your environment.');
     } else if (err.code === 'ECONNREFUSED') {
-      console.error('\nCould not connect to MySQL server. Please ensure the MySQL service is running.');
+      console.error('\nCould not connect to MySQL server. Please verify DB_HOST, DB_PORT, and service status.');
     }
     process.exit(1);
   } finally {
@@ -135,4 +93,9 @@ async function runMigrations() {
   }
 }
 
-runMigrations();
+// Execute if run directly from CLI
+if (require.main === module) {
+  runMigrations();
+}
+
+module.exports = runMigrations;

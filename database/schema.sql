@@ -3,9 +3,6 @@
 -- MySQL 8.0+
 -- ==============================================================================
 
-CREATE DATABASE IF NOT EXISTS `prac_web` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE `prac_web`;
-
 -- Set consistent timezone
 SET time_zone = '+00:00';
 

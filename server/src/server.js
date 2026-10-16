@@ -1,12 +1,15 @@
 const app = require('./app');
 const config = require('./config/env');
 const db = require('./config/db');
+const { autoMigrate } = require('./utils/schemaMigration');
 
 async function startServer() {
   // Test DB connection on startup
   const dbStatus = await db.testConnection();
   if (dbStatus.connected) {
     console.log(`[DB] MySQL database connected successfully to '${config.db.database}' at ${config.db.host}:${config.db.port}`);
+    // Safe idempotent migration check to ensure production schema contains all required columns
+    await autoMigrate();
   } else {
     console.warn(`[DB WARNING] Could not connect to MySQL: ${dbStatus.message}`);
     console.warn(`[DB WARNING] Please update server/.env with your MySQL credentials and run migrations.`);
