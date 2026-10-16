@@ -21,8 +21,8 @@ import { MyQuestionsPage } from './pages/MyQuestionsPage';
 import { MySubmissionsPage } from './pages/MySubmissionsPage';
 import { UserProfilePage } from './pages/UserProfilePage';
 
-// Admin pages
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
+import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AdminLevelsPage } from './pages/AdminLevelsPage';
 import { AdminReportedQuestionsPage } from './pages/AdminReportedQuestionsPage';
 import { AdminQuestionReviewPage } from './pages/AdminQuestionReviewPage';
@@ -93,6 +93,7 @@ export function App() {
           }
         >
           <Route index element={<AdminDashboardPage />} />
+          <Route path="users" element={<AdminUsersPage />} />
           <Route path="levels" element={<AdminLevelsPage />} />
           <Route path="reported" element={<AdminReportedQuestionsPage />} />
           <Route path="questions/:id" element={<AdminQuestionReviewPage />} />

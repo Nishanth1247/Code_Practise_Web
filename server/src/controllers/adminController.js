@@ -198,6 +198,62 @@ async function deleteLevel(req, res, next) {
   }
 }
 
+/**
+ * List registered users for admin console
+ */
+async function getUsers(req, res, next) {
+  try {
+    const { search, role, status, page, limit, sort } = req.query;
+    const result = await adminService.getUsersAdmin({
+      search,
+      role,
+      status,
+      page,
+      limit,
+      sort
+    });
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Get safe user details by ID
+ */
+async function getUserById(req, res, next) {
+  try {
+    const { id } = req.params;
+    const user = await adminService.getUserByIdAdmin(parseInt(id, 10));
+    res.json({
+      success: true,
+      user
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Update user fields (username, email, role)
+ */
+async function updateUser(req, res, next) {
+  try {
+    const { id } = req.params;
+    const result = await adminService.updateUserAdmin(
+      parseInt(id, 10),
+      req.body,
+      req.user.id
+    );
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getOverview,
   getReportedQuestions,
@@ -209,6 +265,9 @@ module.exports = {
   createLevel,
   updateLevel,
   toggleLevelStatus,
-  deleteLevel
+  deleteLevel,
+  getUsers,
+  getUserById,
+  updateUser
 };
 

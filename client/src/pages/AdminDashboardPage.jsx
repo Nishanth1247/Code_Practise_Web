@@ -55,15 +55,18 @@ export function AdminDashboardPage() {
 
       {/* Top Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 bg-white border border-[#DBEAFE] rounded-2xl flex items-center gap-4 shadow-sm">
-          <div className="p-3 bg-blue-50 text-[#2563EB] rounded-xl border border-blue-200">
+        <Link
+          to="/admin/users"
+          className="p-5 bg-white border border-[#DBEAFE] hover:border-[#2563EB] rounded-2xl flex items-center gap-4 shadow-sm hover:shadow-md transition-all group"
+        >
+          <div className="p-3 bg-blue-50 text-[#2563EB] group-hover:bg-[#2563EB] group-hover:text-white rounded-xl border border-blue-200 transition-colors">
             <Users className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs text-[#64748B] font-medium">Total Users</span>
+            <span className="text-xs text-[#64748B] font-medium group-hover:text-[#2563EB] transition-colors">Total Users</span>
             <span className="text-2xl font-black text-[#1E3A8A] block">{stats?.totalUsers || 0}</span>
           </div>
-        </div>
+        </Link>
 
         <div className="p-5 bg-white border border-[#DBEAFE] rounded-2xl flex items-center gap-4 shadow-sm">
           <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-200">

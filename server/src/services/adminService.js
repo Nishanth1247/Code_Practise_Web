@@ -623,6 +623,249 @@ async function deleteLevelAdmin(levelId) {
   };
 }
 
+/**
+ * List registered users with search, role filter, sorting, and pagination for Admin Console
+ */
+async function getUsersAdmin({ search = '', role = '', page = 1, limit = 20, sort = 'newest' } = {}) {
+  const safePage = Math.max(1, parseInt(page, 10) || 1);
+  const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const offset = (safePage - 1) * safeLimit;
+
+  const conditions = [];
+  const params = [];
+
+  if (search && search.trim()) {
+    conditions.push('(u.username LIKE ? OR u.email LIKE ?)');
+    const term = `%${search.trim()}%`;
+    params.push(term, term);
+  }
+
+  if (role && (role.toUpperCase() === 'USER' || role.toUpperCase() === 'ADMIN')) {
+    conditions.push('u.role = ?');
+    params.push(role.toUpperCase());
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  let orderClause = 'u.created_at DESC';
+  if (sort === 'oldest') orderClause = 'u.created_at ASC';
+  else if (sort === 'username_asc') orderClause = 'u.username ASC';
+  else if (sort === 'username_desc') orderClause = 'u.username DESC';
+  else if (sort === 'email_asc') orderClause = 'u.email ASC';
+
+  // Count matching total
+  const countRows = await db.query(
+    `SELECT COUNT(*) AS total FROM users u ${whereClause}`,
+    params
+  );
+  const total = parseInt(countRows[0]?.total || 0, 10);
+
+  // Overall platform user role distribution
+  const roleCounts = await db.query(`
+    SELECT
+      COUNT(*) AS total_all,
+      SUM(CASE WHEN role = 'ADMIN' THEN 1 ELSE 0 END) AS total_admins,
+      SUM(CASE WHEN role = 'USER' THEN 1 ELSE 0 END) AS total_users
+    FROM users
+  `);
+
+  // Query users without exposing password_hash
+  const users = await db.query(
+    `
+    SELECT
+      u.id,
+      u.username,
+      u.email,
+      u.role,
+      u.created_at,
+      u.updated_at,
+      (SELECT COUNT(*) FROM user_solved_questions usq WHERE usq.user_id = u.id) AS solved_count,
+      (SELECT COUNT(*) FROM questions q WHERE q.contributor_id = u.id) AS contributed_count,
+      (SELECT COUNT(*) FROM submissions s WHERE s.user_id = u.id) AS submission_count
+    FROM users u
+    ${whereClause}
+    ORDER BY ${orderClause}
+    LIMIT ? OFFSET ?
+    `,
+    [...params, safeLimit, offset]
+  );
+
+  return {
+    users: users.map(u => ({
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      role: u.role,
+      status: 'ACTIVE',
+      createdAt: u.created_at,
+      updatedAt: u.updated_at,
+      solvedCount: parseInt(u.solved_count || 0, 10),
+      contributedCount: parseInt(u.contributed_count || 0, 10),
+      submissionCount: parseInt(u.submission_count || 0, 10)
+    })),
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: Math.ceil(total / safeLimit) || 1
+    },
+    counts: {
+      totalAll: parseInt(roleCounts[0]?.total_all || 0, 10),
+      totalAdmins: parseInt(roleCounts[0]?.total_admins || 0, 10),
+      totalUsers: parseInt(roleCounts[0]?.total_users || 0, 10)
+    }
+  };
+}
+
+/**
+ * Retrieve a single user's safe profile by ID for Admin Console
+ */
+async function getUserByIdAdmin(userId) {
+  const users = await db.query(
+    `
+    SELECT
+      u.id,
+      u.username,
+      u.email,
+      u.role,
+      u.created_at,
+      u.updated_at,
+      (SELECT COUNT(*) FROM user_solved_questions usq WHERE usq.user_id = u.id) AS solved_count,
+      (SELECT COUNT(*) FROM questions q WHERE q.contributor_id = u.id) AS contributed_count,
+      (SELECT COUNT(*) FROM submissions s WHERE s.user_id = u.id) AS submission_count
+    FROM users u
+    WHERE u.id = ?
+    `,
+    [userId]
+  );
+
+  if (!users || users.length === 0) {
+    const error = new Error('User not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const u = users[0];
+  return {
+    id: u.id,
+    username: u.username,
+    email: u.email,
+    role: u.role,
+    status: 'ACTIVE',
+    createdAt: u.created_at,
+    updatedAt: u.updated_at,
+    solvedCount: parseInt(u.solved_count || 0, 10),
+    contributedCount: parseInt(u.contributed_count || 0, 10),
+    submissionCount: parseInt(u.submission_count || 0, 10)
+  };
+}
+
+/**
+ * Update permitted user fields (username, email, role)
+ * Enforces field validation, unique constraints, and prevents admin lockout
+ */
+async function updateUserAdmin(userId, updateData = {}, currentAdminUserId) {
+  const existingRows = await db.query(
+    'SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?',
+    [userId]
+  );
+
+  if (!existingRows || existingRows.length === 0) {
+    const error = new Error('User not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const existing = existingRows[0];
+
+  const newUsername = updateData.username !== undefined ? String(updateData.username).trim() : existing.username;
+  const newEmail = updateData.email !== undefined ? String(updateData.email).trim().toLowerCase() : existing.email;
+  const newRole = updateData.role !== undefined ? String(updateData.role).toUpperCase().trim() : existing.role;
+
+  // Validate username
+  if (!newUsername || newUsername.length < 3 || newUsername.length > 50) {
+    const error = new Error('Username must be between 3 and 50 characters.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!/^[a-zA-Z0-9_]+$/.test(newUsername)) {
+    const error = new Error('Username may only contain letters, numbers, and underscores.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Validate email
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!newEmail || !emailRegex.test(newEmail)) {
+    const error = new Error('A valid email address is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Validate role
+  if (newRole !== 'USER' && newRole !== 'ADMIN') {
+    const error = new Error('Role must be either USER or ADMIN.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Lockout prevention: if editing own account, admin cannot demote themselves to USER
+  if (parseInt(userId, 10) === parseInt(currentAdminUserId, 10)) {
+    if (newRole !== 'ADMIN') {
+      const error = new Error('You cannot remove administrator privileges from your own account.');
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  // Uniqueness check for email
+  if (newEmail !== existing.email) {
+    const emailConflict = await db.query(
+      'SELECT id FROM users WHERE email = ? AND id != ?',
+      [newEmail, userId]
+    );
+    if (emailConflict && emailConflict.length > 0) {
+      const error = new Error('Email address is already in use by another account.');
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  // Uniqueness check for username
+  if (newUsername !== existing.username) {
+    const usernameConflict = await db.query(
+      'SELECT id FROM users WHERE username = ? AND id != ?',
+      [newUsername, userId]
+    );
+    if (usernameConflict && usernameConflict.length > 0) {
+      const error = new Error('Username is already taken by another account.');
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  // Update in database using parameterized query
+  await db.query(
+    'UPDATE users SET username = ?, email = ?, role = ? WHERE id = ?',
+    [newUsername, newEmail, newRole, userId]
+  );
+
+  return {
+    success: true,
+    message: `User '${newUsername}' updated successfully.`,
+    user: {
+      id: existing.id,
+      username: newUsername,
+      email: newEmail,
+      role: newRole,
+      status: 'ACTIVE',
+      createdAt: existing.created_at,
+      updatedAt: new Date().toISOString()
+    }
+  };
+}
+
 module.exports = {
   getAdminOverview,
   getReportedQuestions,
@@ -634,6 +877,9 @@ module.exports = {
   createLanguageLevelAdmin,
   updateLevelAdmin,
   toggleLevelStatusAdmin,
-  deleteLevelAdmin
+  deleteLevelAdmin,
+  getUsersAdmin,
+  getUserByIdAdmin,
+  updateUserAdmin
 };
 
