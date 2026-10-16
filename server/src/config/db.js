@@ -1,11 +1,49 @@
+const fs = require('fs');
 const mysql = require('mysql2/promise');
 const config = require('./env');
 
 let pool = null;
 
+/**
+ * Build SSL configuration for MySQL connection/pool.
+ * Enforces certificate verification when SSL is enabled.
+ */
+function getSslConfig() {
+  if (!config.db.ssl) {
+    return undefined;
+  }
+
+  // Certificate verification is strictly enforced
+  const sslOptions = {
+    rejectUnauthorized: true
+  };
+
+  if (config.db.sslCa) {
+    let caContent = config.db.sslCa;
+
+    // Check if sslCa is a path to an existing certificate file
+    try {
+      if (typeof caContent === 'string' && fs.existsSync(caContent)) {
+        caContent = fs.readFileSync(caContent, 'utf8');
+      }
+    } catch (e) {
+      // If filesystem check fails, treat as raw certificate string
+    }
+
+    // If PEM certificate contains literal escaped newlines "\n", unescape them
+    if (typeof caContent === 'string' && caContent.includes('\\n')) {
+      caContent = caContent.replace(/\\n/g, '\n');
+    }
+
+    sslOptions.ca = caContent;
+  }
+
+  return sslOptions;
+}
+
 function getPool() {
   if (!pool) {
-    pool = mysql.createPool({
+    const poolConfig = {
       host: config.db.host,
       port: config.db.port,
       user: config.db.user,
@@ -18,7 +56,14 @@ function getPool() {
       keepAliveInitialDelay: 10000,
       timezone: '+00:00',
       dateStrings: true
-    });
+    };
+
+    const ssl = getSslConfig();
+    if (ssl) {
+      poolConfig.ssl = ssl;
+    }
+
+    pool = mysql.createPool(poolConfig);
   }
   return pool;
 }
@@ -81,5 +126,6 @@ module.exports = {
   query,
   getConnection,
   withTransaction,
-  testConnection
+  testConnection,
+  getSslConfig
 };

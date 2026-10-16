@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const mysql = require('mysql2/promise');
 const config = require('../src/config/env');
+const { getSslConfig } = require('../src/config/db');
 
 async function bootstrapAdmin() {
   console.log('--- Admin Bootstrap Script ---');
@@ -14,14 +15,21 @@ async function bootstrapAdmin() {
 
   let connection;
   try {
-    connection = await mysql.createConnection({
+    const connConfig = {
       host: config.db.host,
       port: config.db.port,
       user: config.db.user,
       password: config.db.password,
       database: config.db.database,
       timezone: '+00:00'
-    });
+    };
+
+    const ssl = getSslConfig();
+    if (ssl) {
+      connConfig.ssl = ssl;
+    }
+
+    connection = await mysql.createConnection(connConfig);
 
     console.log(`Checking existing account for email: ${email} or username: ${username}...`);
 

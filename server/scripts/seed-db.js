@@ -3,6 +3,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const mysql = require('mysql2/promise');
 const config = require('../src/config/env');
+const { getSslConfig } = require('../src/config/db');
 const { LANGUAGE_CONFIG } = require('../src/config/judge0');
 
 const cQuestions = require('./data/cQuestions');
@@ -23,7 +24,7 @@ async function seedDatabase() {
 
   let connection;
   try {
-    connection = await mysql.createConnection({
+    const connConfig = {
       host: config.db.host,
       port: config.db.port,
       user: config.db.user,
@@ -31,7 +32,14 @@ async function seedDatabase() {
       database: config.db.database,
       multipleStatements: true,
       timezone: '+00:00'
-    });
+    };
+
+    const ssl = getSslConfig();
+    if (ssl) {
+      connConfig.ssl = ssl;
+    }
+
+    connection = await mysql.createConnection(connConfig);
 
     console.log('[OK] Connected to database.');
 

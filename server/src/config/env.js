@@ -18,6 +18,8 @@ const config = {
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'prac_web',
     connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT, 10) || 10,
+    ssl: String(process.env.DB_SSL || '').toLowerCase() === 'true',
+    sslCa: process.env.DB_SSL_CA || '',
   },
 
   // JWT

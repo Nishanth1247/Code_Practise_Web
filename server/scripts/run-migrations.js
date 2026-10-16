@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 const config = require('../src/config/env');
+const { getSslConfig } = require('../src/config/db');
 
 async function runMigrations() {
   console.log('--- Starting Database Migration ---');
@@ -9,15 +10,22 @@ async function runMigrations() {
 
   let connection;
   try {
-    // Connect without specifying database first to create database if not exists
-    connection = await mysql.createConnection({
+    const connConfig = {
       host: config.db.host,
       port: config.db.port,
       user: config.db.user,
       password: config.db.password,
       multipleStatements: true,
       timezone: '+00:00'
-    });
+    };
+
+    const ssl = getSslConfig();
+    if (ssl) {
+      connConfig.ssl = ssl;
+    }
+
+    // Connect without specifying database first to create database if not exists
+    connection = await mysql.createConnection(connConfig);
 
     console.log('[OK] Connected to MySQL server.');
 
