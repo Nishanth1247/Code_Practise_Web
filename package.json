@@ -1,0 +1,16 @@
+{
+  "name": "prac-web",
+  "version": "1.0.0",
+  "description": "Level-Based Community Coding Practice Platform",
+  "private": true,
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix client install",
+    "server": "npm --prefix server run dev",
+    "client": "npm --prefix client run dev",
+    "db:migrate": "npm --prefix server run db:migrate",
+    "db:seed": "npm --prefix server run db:seed",
+    "admin:bootstrap": "npm --prefix server run admin:bootstrap",
+    "test": "npm --prefix server test",
+    "build:client": "npm --prefix client run build"
+  }
+}

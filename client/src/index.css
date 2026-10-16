@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#F5F9FF] text-[#172554] antialiased selection:bg-[#2563EB] selection:text-white;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F5F9FF;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Monaco Editor cursor and text alignment fixes */
+.monaco-editor,
+.monaco-editor .overflow-guard,
+.monaco-editor .monaco-scrollable-element,
+.monaco-editor .lines-content,
+.monaco-editor .view-lines,
+.monaco-editor .view-line,
+.monaco-editor .cursor,
+.monaco-editor .cursors-layer,
+.monaco-editor .current-line,
+.monaco-editor .inputarea {
+  font-feature-settings: normal !important;
+  letter-spacing: 0px !important;
+  word-spacing: 0px !important;
+  font-variant-ligatures: none !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.monaco-editor .view-line {
+  letter-spacing: 0px !important;
+  word-spacing: 0px !important;
+}
+
+.monaco-editor .inputarea {
+  letter-spacing: 0px !important;
+}
