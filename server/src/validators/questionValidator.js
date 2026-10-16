@@ -39,6 +39,10 @@ const validateCreateQuestion = [
   body('level_id')
     .isInt({ min: 1 })
     .withMessage('Valid level ID is required'),
+  body('compiler_id')
+    .optional({ nullable: true })
+    .isInt({ min: 1 })
+    .withMessage('Valid compiler ID is required'),
   body('samples')
     .isArray({ min: 1 })
     .withMessage('At least one sample input/output pair is required'),

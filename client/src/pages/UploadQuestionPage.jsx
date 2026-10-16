@@ -7,8 +7,25 @@ import {
   CheckCircle2,
   AlertCircle,
   Eye,
-  Edit3
+  Edit3,
+  Sparkles,
+  Bot,
+  Copy,
+  Check,
+  Cpu,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  FileText
 } from 'lucide-react';
+
+const COMPILER_CONFIG = {
+  c: { name: 'GCC 9.2.0', judge0Id: 50, label: 'C (GCC 9.2.0)' },
+  cpp: { name: 'GCC 9.2.0', judge0Id: 54, label: 'C++ (GCC 9.2.0)' },
+  java: { name: 'OpenJDK 13', judge0Id: 62, label: 'Java (OpenJDK 13)' },
+  python: { name: 'Python 3.8.1', judge0Id: 71, label: 'Python (3.8.1)' }
+};
 
 export function UploadQuestionPage() {
   const navigate = useNavigate();
@@ -19,6 +36,11 @@ export function UploadQuestionPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // AI Prompt Helper states
+  const [promptCopied, setPromptCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const [showPromptPreview, setShowPromptPreview] = useState(false);
 
   // Form fields
   const [title, setTitle] = useState('');
@@ -76,6 +98,122 @@ export function UploadQuestionPage() {
     fetchLevels();
   }, [languageId]);
 
+  // Selected language and level objects
+  const selectedLangObj = languages.find(l => l.id === parseInt(languageId, 10));
+  const selectedLvlObj = levels.find(l => l.id === parseInt(levelId, 10));
+
+  // Automatic Compiler Selection: mapped strictly from selected language slug
+  const currentCompiler = (selectedLangObj && COMPILER_CONFIG[selectedLangObj.slug?.toLowerCase()]) || {
+    name: 'GCC 9.2.0',
+    judge0Id: 50,
+    label: 'C (GCC 9.2.0)'
+  };
+
+  // Structured ChatGPT Prompt tailored to CodeCraft
+  const targetLanguageName = selectedLangObj ? selectedLangObj.name : '[LANGUAGE: C / C++ / Java / Python]';
+  const targetLevelLabel = selectedLvlObj
+    ? `Level ${selectedLvlObj.levelNumber} (${selectedLvlObj.title})`
+    : '[TARGET LEVEL: e.g. Level 1 - Basics]';
+
+  const chatGptPrompt = `I want to create a high-quality coding practice question for CodeCraft, a level-based community coding practice platform.
+
+Target Language: ${targetLanguageName} (Compiler: ${currentCompiler.label})
+Target Level: ${targetLevelLabel}
+Topic / Concept: [REPLACE WITH TOPIC: e.g. Array Manipulation, Two Pointers, String Parsing, Recursion, Dynamic Programming]
+
+Please generate a complete coding question strictly in the following format so it can be directly copied into CodeCraft:
+
+1. TITLE:
+A clear, concise, descriptive title (e.g. "Find the First Non-Repeating Character").
+
+2. PROBLEM STATEMENT:
+A detailed problem description explaining the challenge, the goals, rules, and any edge-case considerations.
+
+3. INPUT FORMAT:
+Exact line-by-line input structure (e.g. "The first line contains an integer T. The next T lines contain...").
+
+4. OUTPUT FORMAT:
+Exact line-by-line output structure including spacing and newline conventions.
+
+5. CONSTRAINTS:
+Clear mathematical and execution bounds (e.g. 1 <= N <= 10^5, -10^9 <= A[i] <= 10^9, Time Limit: 2.5s, Memory Limit: 128MB).
+
+6. EXPLANATION:
+A brief walkthrough of why the sample inputs produce the expected sample outputs.
+
+7. VISIBLE SAMPLE CASES (Provide 2 clear sample pairs):
+--- Sample Case 1 ---
+Sample Input:
+<exact sample input here>
+Expected Output:
+<exact sample output here>
+Explanation:
+<explanation for sample 1>
+
+--- Sample Case 2 ---
+Sample Input:
+<exact sample input here>
+Expected Output:
+<exact sample output here>
+Explanation:
+<explanation for sample 2>
+
+8. HIDDEN TEST CASES (Used for automated grading, provide at least 3 covering boundary conditions, minimal inputs, and large cases):
+--- Hidden Test Case 1 ---
+Test Input:
+<hidden input here>
+Expected Output:
+<hidden output here>
+
+--- Hidden Test Case 2 ---
+Test Input:
+<hidden input here>
+Expected Output:
+<hidden output here>
+
+--- Hidden Test Case 3 ---
+Test Input:
+<hidden input here>
+Expected Output:
+<hidden output here>
+
+9. REFERENCE SOLUTION CODE:
+Clean, production-grade, optimal solution written in ${targetLanguageName} that passes all sample and hidden test cases under the specified compiler (${currentCompiler.label}).
+
+10. COMPLEXITY:
+- Time Complexity: O(...)
+- Space Complexity: O(...)
+
+Ensure all test case outputs are 100% accurate, properly formatted, and match the specified input and output formats exactly.`;
+
+  // Copy-to-clipboard handler with fallback support
+  const handleCopyPrompt = async () => {
+    try {
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(chatGptPrompt);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = chatGptPrompt;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        textArea.style.top = '0';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const success = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (!success) throw new Error('execCommand copy failed');
+      }
+      setPromptCopied(true);
+      setCopyError(false);
+      setTimeout(() => setPromptCopied(false), 3000);
+    } catch (err) {
+      console.error('Failed to copy prompt to clipboard:', err);
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 3000);
+    }
+  };
+
   // Sample management
   const addSample = () => {
     setSamples([...samples, { sample_input: '', expected_output: '', explanation: '' }]);
@@ -115,6 +253,7 @@ export function UploadQuestionPage() {
         title,
         language_id: parseInt(languageId, 10),
         level_id: parseInt(levelId, 10),
+        compiler_id: currentCompiler.judge0Id,
         statement,
         input_format: inputFormat,
         output_format: outputFormat,
@@ -138,9 +277,6 @@ export function UploadQuestionPage() {
       setLoading(false);
     }
   };
-
-  const selectedLangObj = languages.find(l => l.id === parseInt(languageId, 10));
-  const selectedLvlObj = levels.find(l => l.id === parseInt(levelId, 10));
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full">
@@ -190,45 +326,273 @@ export function UploadQuestionPage() {
       )}
 
       {activeTab === 'edit' ? (
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Section 1: Track & Level Selection */}
-          <div className="p-6 bg-white border border-[#DBEAFE] rounded-2xl space-y-4 shadow-sm">
-            <h3 className="text-base font-bold text-[#1E3A8A] mb-2">1. Track & Level Selection</h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
-                  Programming Language *
-                </label>
-                <select
-                  value={languageId}
-                  onChange={(e) => setLanguageId(e.target.value)}
-                  className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-[#172554] text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                >
-                  {languages.map((l) => (
-                    <option key={l.id} value={l.id}>{l.name}</option>
-                  ))}
-                </select>
+        <div className="space-y-6">
+          {/* ChatGPT Question Contribution Guide and Copyable Prompt */}
+          <div className="bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-white border border-[#BFDBFE] rounded-2xl p-6 shadow-sm">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5 pb-4 border-b border-[#DBEAFE]">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="p-2.5 bg-[#2563EB] text-white rounded-xl shadow-xs">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-lg font-extrabold text-[#1E3A8A]">
+                      Need Help Creating a Question? Use ChatGPT
+                    </h2>
+                    <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100 text-[#1D4ED8]">
+                      AI Contribution Assistant
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#64748B] mt-0.5">
+                    Generate high-quality practice questions tailored specifically for CodeCraft in one click.
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
-                  Target Level *
-                </label>
-                <select
-                  value={levelId}
-                  onChange={(e) => setLevelId(e.target.value)}
-                  className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-[#172554] text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+              {/* Action buttons */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowPromptPreview(!showPromptPreview)}
+                  className="px-3.5 py-2 bg-white hover:bg-[#F5F9FF] text-[#1E3A8A] border border-[#DBEAFE] rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all"
                 >
-                  {levels.map((lvl) => (
-                    <option key={lvl.id} value={lvl.id}>
-                      Level {lvl.levelNumber}: {lvl.title}
-                    </option>
-                  ))}
-                </select>
+                  <FileText className="w-3.5 h-3.5 text-[#2563EB]" />
+                  {showPromptPreview ? 'Hide Prompt' : 'View Prompt'}
+                  {showPromptPreview ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyPrompt}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all ${
+                    promptCopied
+                      ? 'bg-emerald-600 text-white'
+                      : copyError
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white'
+                  }`}
+                >
+                  {promptCopied ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      Prompt Copied!
+                    </>
+                  ) : copyError ? (
+                    <>
+                      <AlertCircle className="w-4 h-4" />
+                      Copy Failed
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      Copy ChatGPT Prompt
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Notification when copied */}
+            {promptCopied && (
+              <div className="p-3 mb-5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2 font-medium">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  Prompt copied to clipboard! Paste it into ChatGPT, replace any topic placeholder, and transfer the generated fields below.
+                </span>
+              </div>
+            )}
+
+            {copyError && (
+              <div className="p-3 mb-5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2 font-medium">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>
+                  Clipboard permission was blocked by your browser. Click "View Prompt" above and copy the prompt text manually.
+                </span>
+              </div>
+            )}
+
+            {/* 8-Step Guideline Grid */}
+            <div className="mb-5">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1E3A8A] mb-3 flex items-center gap-1.5">
+                <Bot className="w-3.5 h-3.5 text-[#2563EB]" />
+                How to Use ChatGPT to Contribute (8 Simple Steps)
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                <div className="p-3 bg-white rounded-xl border border-[#DBEAFE] shadow-2xs">
+                  <div className="font-bold text-[#1E3A8A] flex items-center gap-1.5 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-[#2563EB] text-white flex items-center justify-center text-[10px] font-bold">1</span>
+                    Copy Prompt
+                  </div>
+                  <p className="text-[#64748B] text-[11px] leading-relaxed">
+                    Click "Copy ChatGPT Prompt" to grab our structured template with schema fields.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-[#DBEAFE] shadow-2xs">
+                  <div className="font-bold text-[#1E3A8A] flex items-center gap-1.5 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-[#2563EB] text-white flex items-center justify-center text-[10px] font-bold">2</span>
+                    Open ChatGPT
+                  </div>
+                  <p className="text-[#64748B] text-[11px] leading-relaxed">
+                    Open ChatGPT (or your preferred AI model) in a browser tab or desktop application.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-[#DBEAFE] shadow-2xs">
+                  <div className="font-bold text-[#1E3A8A] flex items-center gap-1.5 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-[#2563EB] text-white flex items-center justify-center text-[10px] font-bold">3</span>
+                    Paste & Customize
+                  </div>
+                  <p className="text-[#64748B] text-[11px] leading-relaxed">
+                    Paste the prompt and specify your desired coding topic or target algorithm.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-[#DBEAFE] shadow-2xs">
+                  <div className="font-bold text-[#1E3A8A] flex items-center gap-1.5 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-[#2563EB] text-white flex items-center justify-center text-[10px] font-bold">4</span>
+                    Review for Quality
+                  </div>
+                  <p className="text-[#64748B] text-[11px] leading-relaxed">
+                    Review the generated question for accuracy, clarity, constraints, and correctness.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-[#DBEAFE] shadow-2xs">
+                  <div className="font-bold text-[#1E3A8A] flex items-center gap-1.5 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-[#2563EB] text-white flex items-center justify-center text-[10px] font-bold">5</span>
+                    Test Solution Code
+                  </div>
+                  <p className="text-[#64748B] text-[11px] leading-relaxed">
+                    Test the provided reference solution code against the generated test cases.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-[#DBEAFE] shadow-2xs">
+                  <div className="font-bold text-[#1E3A8A] flex items-center gap-1.5 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-[#2563EB] text-white flex items-center justify-center text-[10px] font-bold">6</span>
+                    Transfer into Form
+                  </div>
+                  <p className="text-[#64748B] text-[11px] leading-relaxed">
+                    Copy the generated fields (title, statement, formats, constraints) into this form.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-[#DBEAFE] shadow-2xs">
+                  <div className="font-bold text-[#1E3A8A] flex items-center gap-1.5 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-[#2563EB] text-white flex items-center justify-center text-[10px] font-bold">7</span>
+                    Verify Test Cases
+                  </div>
+                  <p className="text-[#64748B] text-[11px] leading-relaxed">
+                    Verify all test cases match the expected input and exact output formatting.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-[#DBEAFE] shadow-2xs">
+                  <div className="font-bold text-[#1E3A8A] flex items-center gap-1.5 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-[#2563EB] text-white flex items-center justify-center text-[10px] font-bold">8</span>
+                    Publish Question
+                  </div>
+                  <p className="text-[#64748B] text-[11px] leading-relaxed">
+                    Submit the question to publish it directly for community practice and review.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Expandable Prompt Preview */}
+            {showPromptPreview && (
+              <div className="mb-5 bg-[#0F172A] rounded-xl p-4 border border-slate-700">
+                <div className="flex items-center justify-between text-xs text-slate-300 font-mono mb-2 pb-2 border-b border-slate-700">
+                  <span className="flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-blue-400" />
+                    Structured Prompt Template Preview:
+                  </span>
+                  <span className="text-[11px] text-slate-400">Targeting {currentCompiler.label}</span>
+                </div>
+                <pre className="text-emerald-400 font-mono text-xs whitespace-pre-wrap max-h-80 overflow-y-auto leading-relaxed select-all">
+                  {chatGptPrompt}
+                </pre>
+              </div>
+            )}
+
+            {/* Prominent Contributor Responsibility Note */}
+            <div className="p-3.5 bg-amber-50/90 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <span className="font-bold text-amber-950">Important Notice for Contributors: </span>
+                AI-generated questions must be reviewed and tested by you before submission. Inaccurate, low-quality, or duplicate questions may be rejected during moderation.
               </div>
             </div>
           </div>
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Section 1: Track & Level Selection with Automatic Compiler Selection */}
+            <div className="p-6 bg-white border border-[#DBEAFE] rounded-2xl space-y-5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-[#1E3A8A]">1. Track & Level Selection</h3>
+                <span className="text-xs text-[#64748B]">Step 1 of 4</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
+                    Programming Language *
+                  </label>
+                  <select
+                    value={languageId}
+                    onChange={(e) => setLanguageId(e.target.value)}
+                    className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-[#172554] text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                  >
+                    {languages.map((l) => (
+                      <option key={l.id} value={l.id}>{l.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
+                    Target Level *
+                  </label>
+                  <select
+                    value={levelId}
+                    onChange={(e) => setLevelId(e.target.value)}
+                    className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-[#172554] text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                  >
+                    {levels.map((lvl) => (
+                      <option key={lvl.id} value={lvl.id}>
+                        Level {lvl.levelNumber}: {lvl.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Automatic Compiler Runtime Indicator (Read-only, derived automatically from language) */}
+              <div className="p-4 bg-[#F8FAFC] border border-[#CBD5E1] rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-50 text-[#2563EB] rounded-lg border border-blue-200 shrink-0">
+                    <Cpu className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-[#64748B] font-bold uppercase tracking-wider">
+                      Automated Compiler Runtime
+                    </div>
+                    <div className="text-sm font-bold text-[#1E3A8A] flex items-center gap-2 flex-wrap">
+                      <span>{currentCompiler.label}</span>
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#DBEAFE] text-[#1E3A8A] font-mono font-semibold">
+                        Judge0 ID: {currentCompiler.judge0Id}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-xs text-[#64748B]">
+                  <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    Auto-configured for {selectedLangObj?.name || 'language'}
+                  </span>
+                </div>
+              </div>
+            </div>
 
           {/* Section 2: Problem Statement */}
           <div className="p-6 bg-white border border-[#DBEAFE] rounded-2xl space-y-4 shadow-sm">
@@ -459,13 +823,18 @@ export function UploadQuestionPage() {
             )}
           </button>
         </form>
+      </div>
       ) : (
         /* Preview Tab */
         <div className="p-8 bg-white border border-[#DBEAFE] rounded-2xl space-y-6 shadow-sm">
           <div className="border-b border-[#DBEAFE] pb-4">
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-3 mb-2 flex-wrap">
               <span className="text-xs px-2.5 py-1 rounded-full bg-[#DBEAFE] text-[#1E3A8A] font-bold">
                 {selectedLangObj?.name || 'Language'} &bull; Level {selectedLvlObj?.levelNumber || '1'}
+              </span>
+              <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-mono font-semibold border border-slate-200 flex items-center gap-1.5">
+                <Cpu className="w-3.5 h-3.5 text-[#2563EB]" />
+                Compiler: {currentCompiler.label} (Judge0 ID: {currentCompiler.judge0Id})
               </span>
             </div>
             <h2 className="text-2xl font-bold text-[#1E3A8A]">{title || 'Untitled Question'}</h2>

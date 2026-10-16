@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const reportService = require('../services/reportService');
+const { LANGUAGE_CONFIG } = require('../config/judge0');
 
 /**
  * Get active questions for a specific level with filters, search, sort, and pagination
@@ -254,6 +255,19 @@ async function createQuestion(req, res, next) {
         success: false,
         error: 'Invalid or disabled programming language selected.'
       });
+    }
+
+    // Verify compiler ID if provided matches the language's expected Judge0 compiler ID
+    const langSlug = langRows[0].slug.toLowerCase();
+    const expectedConfig = LANGUAGE_CONFIG[langSlug];
+    if (req.body.compiler_id && expectedConfig) {
+      const providedCompilerId = parseInt(req.body.compiler_id, 10);
+      if (providedCompilerId !== expectedConfig.judge0Id) {
+        return res.status(400).json({
+          success: false,
+          error: `Compiler mismatch: The selected language requires compiler '${expectedConfig.displayName}' (Judge0 ID ${expectedConfig.judge0Id}). Received ID ${providedCompilerId}.`
+        });
+      }
     }
 
     // Verify level exists for that language

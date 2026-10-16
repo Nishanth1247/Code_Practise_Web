@@ -33,4 +33,16 @@ describe('Code Execution and Output Normalization Tests', () => {
       })
     ).rejects.toThrow('Unsupported programming language');
   });
+
+  test('LANGUAGE_CONFIG has correct Judge0 compiler mappings for all supported languages', () => {
+    const { LANGUAGE_CONFIG } = require('../src/config/judge0');
+    expect(LANGUAGE_CONFIG.c.judge0Id).toBe(50);
+    expect(LANGUAGE_CONFIG.c.displayName).toBe('C (GCC 9.2.0)');
+    expect(LANGUAGE_CONFIG.cpp.judge0Id).toBe(54);
+    expect(LANGUAGE_CONFIG.cpp.displayName).toBe('C++ (GCC 9.2.0)');
+    expect(LANGUAGE_CONFIG.java.judge0Id).toBe(62);
+    expect(LANGUAGE_CONFIG.java.displayName).toBe('Java (OpenJDK 13)');
+    expect(LANGUAGE_CONFIG.python.judge0Id).toBe(71);
+    expect(LANGUAGE_CONFIG.python.displayName).toBe('Python (3.8.1)');
+  });
 });
