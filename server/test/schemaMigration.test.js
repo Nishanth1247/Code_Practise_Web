@@ -6,20 +6,31 @@ const db = require('../src/config/db');
 const { runIdempotentMigrations } = require('../src/utils/schemaMigration');
 
 describe('Schema Migration & Soft-Delete Production Resilience Tests', () => {
-  const adminUser = { id: 2, username: 'admin', email: 'admin@example.com', role: 'ADMIN' };
-  const standardUser = { id: 3, username: 'dev_coder', email: 'coder@example.com', role: 'USER' };
+  let adminUser;
+  let standardUser;
+  let adminToken;
+  let userToken;
 
-  const adminToken = jwt.sign(
-    { userId: adminUser.id, username: adminUser.username, email: adminUser.email, role: adminUser.role },
-    config.jwt.secret,
-    { expiresIn: '1h' }
-  );
+  beforeAll(async () => {
+    const pool = db.getPool();
+    const [admins] = await pool.query("SELECT id, username, email, role FROM users WHERE role = 'ADMIN' AND (status = 'ACTIVE' OR status IS NULL) LIMIT 1");
+    adminUser = admins[0] || { id: 3, username: 'admin', email: 'admin@example.com', role: 'ADMIN' };
 
-  const userToken = jwt.sign(
-    { userId: standardUser.id, username: standardUser.username, email: standardUser.email, role: standardUser.role },
-    config.jwt.secret,
-    { expiresIn: '1h' }
-  );
+    const [users] = await pool.query("SELECT id, username, email, role FROM users WHERE role = 'USER' AND (status = 'ACTIVE' OR status IS NULL) LIMIT 1");
+    standardUser = users[0] || { id: 2, username: 'user', email: 'user@example.com', role: 'USER' };
+
+    adminToken = jwt.sign(
+      { userId: adminUser.id, username: adminUser.username, email: adminUser.email, role: 'ADMIN' },
+      config.jwt.secret,
+      { expiresIn: '1h' }
+    );
+
+    userToken = jwt.sign(
+      { userId: standardUser.id, username: standardUser.username, email: standardUser.email, role: 'USER' },
+      config.jwt.secret,
+      { expiresIn: '1h' }
+    );
+  });
 
   // ---------------------------------------------------------------------------
   // 1. Idempotency and Schema Inspection

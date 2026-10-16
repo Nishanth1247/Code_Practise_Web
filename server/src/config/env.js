@@ -40,6 +40,11 @@ const config = {
     username: process.env.BOOTSTRAP_ADMIN_USERNAME || 'admin',
     email: process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@pracweb.dev',
     password: process.env.BOOTSTRAP_ADMIN_PASSWORD || 'Admin@PracWeb2026!',
+  },
+
+  // Google OAuth
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
   }
 };
 

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { GoogleSignInButton } from '../components/auth/GoogleSignInButton';
 import { Lock, Mail, User, ArrowRight, AlertCircle } from 'lucide-react';
 
 export function RegisterPage() {
-  const { register } = useAuth();
+  const { register, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
 
   const [username, setUsername] = useState('');
@@ -12,6 +13,7 @@ export function RegisterPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
@@ -41,9 +43,27 @@ export function RegisterPage() {
     }
   };
 
+  const handleGoogleSuccess = async (credential) => {
+    setError('');
+    setGoogleLoading(true);
+
+    try {
+      await loginWithGoogle(credential);
+      navigate('/dashboard', { replace: true });
+    } catch (err) {
+      setError(err.response?.data?.error || 'Google registration failed. Please try again.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleError = (errMsg) => {
+    setError(errMsg || 'Google registration failed.');
+  };
+
   return (
     <div className="flex-1 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md space-y-8 bg-white border border-[#DBEAFE] p-8 rounded-2xl shadow-sm">
+      <div className="w-full max-w-md space-y-6 bg-white border border-[#DBEAFE] p-8 rounded-2xl shadow-sm">
         <div className="text-center">
           <h2 className="text-3xl font-extrabold tracking-tight text-[#1E3A8A]">Join CodeCraft</h2>
           <p className="mt-2 text-sm text-[#64748B]">
@@ -58,7 +78,29 @@ export function RegisterPage() {
           </div>
         )}
 
-        <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
+        {/* Google Sign-In / Sign-Up Button */}
+        <div className="pt-2">
+          <GoogleSignInButton
+            onSuccess={handleGoogleSuccess}
+            onError={handleGoogleError}
+            loading={googleLoading}
+            disabled={loading || googleLoading}
+          />
+        </div>
+
+        {/* Divider */}
+        <div className="relative my-4">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-[#DBEAFE]"></div>
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-white px-3 text-[#64748B] font-semibold tracking-wider">
+              Or register with email
+            </span>
+          </div>
+        </div>
+
+        <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
             <label className="block text-xs font-semibold text-[#172554] uppercase tracking-wider mb-1.5">
               Username

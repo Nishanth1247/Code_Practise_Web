@@ -48,8 +48,27 @@ const validateLogin = [
   handleValidationErrors
 ];
 
+const validateGoogleAuth = [
+  (req, res, next) => {
+    const token = req.body.credential || req.body.idToken || req.body.token;
+    if (!token || typeof token !== 'string' || token.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google ID token (credential) is required.'
+      });
+    }
+    // Prevent client tampering: strip any client-supplied role, status, or email
+    delete req.body.role;
+    delete req.body.status;
+    delete req.body.email;
+    delete req.body.user;
+    next();
+  }
+];
+
 module.exports = {
   validateRegister,
   validateLogin,
+  validateGoogleAuth,
   handleValidationErrors
 };

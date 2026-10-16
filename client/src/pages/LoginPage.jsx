@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { GoogleSignInButton } from '../components/auth/GoogleSignInButton';
 import { Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react';
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
 
   const from = location.state?.from?.pathname || '/dashboard';
@@ -30,9 +32,27 @@ export function LoginPage() {
     }
   };
 
+  const handleGoogleSuccess = async (credential) => {
+    setError('');
+    setGoogleLoading(true);
+
+    try {
+      await loginWithGoogle(credential);
+      navigate(from, { replace: true });
+    } catch (err) {
+      setError(err.response?.data?.error || 'Google authentication failed. Please try again.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleError = (errMsg) => {
+    setError(errMsg || 'Google authentication failed.');
+  };
+
   return (
     <div className="flex-1 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md space-y-8 bg-white border border-[#DBEAFE] p-8 rounded-2xl shadow-sm">
+      <div className="w-full max-w-md space-y-6 bg-white border border-[#DBEAFE] p-8 rounded-2xl shadow-sm">
         <div className="text-center">
           <h2 className="text-3xl font-extrabold tracking-tight text-[#1E3A8A]">Welcome back</h2>
           <p className="mt-2 text-sm text-[#64748B]">
@@ -47,7 +67,29 @@ export function LoginPage() {
           </div>
         )}
 
-        <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+        {/* Google Sign-In Button */}
+        <div className="pt-2">
+          <GoogleSignInButton
+            onSuccess={handleGoogleSuccess}
+            onError={handleGoogleError}
+            loading={googleLoading}
+            disabled={loading || googleLoading}
+          />
+        </div>
+
+        {/* Divider */}
+        <div className="relative my-4">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-[#DBEAFE]"></div>
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-white px-3 text-[#64748B] font-semibold tracking-wider">
+              Or continue with email
+            </span>
+          </div>
+        </div>
+
+        <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
             <label className="block text-xs font-semibold text-[#172554] uppercase tracking-wider mb-2">
               Email Address

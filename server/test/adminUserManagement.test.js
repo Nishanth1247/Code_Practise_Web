@@ -5,20 +5,35 @@ const config = require('../src/config/env');
 const db = require('../src/config/db');
 
 describe('Admin User Management Feature Tests', () => {
-  const adminUser = { id: 2, username: 'admin', email: 'admin@example.com', role: 'ADMIN' };
-  const normalUser = { id: 3, username: 'Nishanth', email: 'nishanthprakash777@gmail.com', role: 'USER' };
+  let adminUser;
+  let normalUser;
+  let rootAdminUser;
+  let adminToken;
+  let userToken;
 
-  const adminToken = jwt.sign(
-    { userId: adminUser.id, username: adminUser.username, email: adminUser.email, role: adminUser.role },
-    config.jwt.secret,
-    { expiresIn: '1h' }
-  );
+  beforeAll(async () => {
+    const pool = db.getPool();
+    const [admins] = await pool.query("SELECT id, username, email, role FROM users WHERE role = 'ADMIN' AND (status = 'ACTIVE' OR status IS NULL) LIMIT 1");
+    adminUser = admins[0] || { id: 3, username: 'admin', email: 'admin@example.com', role: 'ADMIN' };
 
-  const userToken = jwt.sign(
-    { userId: normalUser.id, username: normalUser.username, email: normalUser.email, role: normalUser.role },
-    config.jwt.secret,
-    { expiresIn: '1h' }
-  );
+    const [users] = await pool.query("SELECT id, username, email, role FROM users WHERE role = 'USER' AND (status = 'ACTIVE' OR status IS NULL) AND email != 'admin@example.com' LIMIT 1");
+    normalUser = users[0] || { id: 5, username: 'user', email: 'user@example.com', role: 'USER' };
+
+    const [rootAdmins] = await pool.query("SELECT id, username, email, role FROM users WHERE email = 'admin@example.com' LIMIT 1");
+    rootAdminUser = rootAdmins[0] || { id: 2, email: 'admin@example.com' };
+
+    adminToken = jwt.sign(
+      { userId: adminUser.id, username: adminUser.username, email: adminUser.email, role: 'ADMIN' },
+      config.jwt.secret,
+      { expiresIn: '1h' }
+    );
+
+    userToken = jwt.sign(
+      { userId: normalUser.id, username: normalUser.username, email: normalUser.email, role: 'USER' },
+      config.jwt.secret,
+      { expiresIn: '1h' }
+    );
+  });
 
   // 1. Authorization checks
   test('Unauthenticated user cannot access GET /api/admin/users (401)', async () => {
@@ -67,7 +82,7 @@ describe('Admin User Management Feature Tests', () => {
 
   test('Admin can search users by username and filter by role', async () => {
     const res = await request(app)
-      .get('/api/admin/users?search=admin&role=ADMIN')
+      .get(`/api/admin/users?search=${encodeURIComponent(adminUser.username)}&role=ADMIN`)
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
@@ -75,21 +90,24 @@ describe('Admin User Management Feature Tests', () => {
     expect(res.body.users.length).toBeGreaterThan(0);
     res.body.users.forEach(u => {
       expect(u.role).toBe('ADMIN');
-      expect(u.username.toLowerCase().includes('admin') || u.email.toLowerCase().includes('admin')).toBe(true);
+      expect(
+        u.username.toLowerCase().includes(adminUser.username.toLowerCase()) ||
+        u.email.toLowerCase().includes(adminUser.username.toLowerCase())
+      ).toBe(true);
     });
   });
 
   // 3. Single user details
   test('Admin can fetch single user details (GET /api/admin/users/:id)', async () => {
     const res = await request(app)
-      .get('/api/admin/users/2')
+      .get(`/api/admin/users/${normalUser.id}`)
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.user).toBeDefined();
-    expect(res.body.user.id).toBe(2);
-    expect(res.body.user.username).toBe('admin');
+    expect(res.body.user.id).toBe(normalUser.id);
+    expect(res.body.user.username).toBe(normalUser.username);
     expect(res.body.user.password_hash).toBeUndefined();
   });
 
@@ -105,7 +123,7 @@ describe('Admin User Management Feature Tests', () => {
   // 4. Update validations
   test('Admin updating user rejects invalid email format (400)', async () => {
     const res = await request(app)
-      .patch('/api/admin/users/3')
+      .patch(`/api/admin/users/${normalUser.id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ email: 'not-an-email' });
 
@@ -115,7 +133,7 @@ describe('Admin User Management Feature Tests', () => {
 
   test('Admin updating user rejects invalid username format (400)', async () => {
     const res = await request(app)
-      .patch('/api/admin/users/3')
+      .patch(`/api/admin/users/${normalUser.id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ username: 'ab' }); // less than 3 chars
 
@@ -124,11 +142,11 @@ describe('Admin User Management Feature Tests', () => {
   });
 
   test('Admin updating user rejects duplicate email (409)', async () => {
-    // Attempt to set user 3's email to user 2's email (admin@example.com)
+    // Attempt to set normalUser's email to adminUser's email
     const res = await request(app)
-      .patch('/api/admin/users/3')
+      .patch(`/api/admin/users/${normalUser.id}`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'admin@example.com' });
+      .send({ email: adminUser.email });
 
     expect(res.status).toBe(409);
     expect(res.body.success).toBe(false);
@@ -137,7 +155,7 @@ describe('Admin User Management Feature Tests', () => {
 
   test('Admin cannot demote own account from ADMIN to USER (Lockout Prevention)', async () => {
     const res = await request(app)
-      .patch('/api/admin/users/2') // admin user's own ID
+      .patch(`/api/admin/users/${adminUser.id}`) // admin user's own ID
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ role: 'USER' });
 
@@ -148,21 +166,21 @@ describe('Admin User Management Feature Tests', () => {
 
   // 5. Successful user edit & verification
   test('Admin can successfully edit a user (username, email, role) and changes persist', async () => {
-    // Fetch initial state of user 3
+    // Fetch initial state of normalUser
     const initialRes = await request(app)
-      .get('/api/admin/users/3')
+      .get(`/api/admin/users/${normalUser.id}`)
       .set('Authorization', `Bearer ${adminToken}`);
 
     const originalUsername = initialRes.body.user.username;
     const originalEmail = initialRes.body.user.email;
     const originalRole = initialRes.body.user.role;
 
-    // Update user 3
-    const updatedUsername = 'Nishanth_Coder';
-    const updatedEmail = 'nishanth_test@pracweb.dev';
+    // Update normalUser
+    const updatedUsername = `${originalUsername}_Test`.slice(0, 30);
+    const updatedEmail = `test_${Date.now()}@pracweb.dev`;
 
     const updateRes = await request(app)
-      .patch('/api/admin/users/3')
+      .patch(`/api/admin/users/${normalUser.id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
         username: updatedUsername,
@@ -177,15 +195,15 @@ describe('Admin User Management Feature Tests', () => {
 
     // Verify in database by querying directly or via GET endpoint
     const verifyRes = await request(app)
-      .get('/api/admin/users/3')
+      .get(`/api/admin/users/${normalUser.id}`)
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(verifyRes.body.user.username).toBe(updatedUsername);
     expect(verifyRes.body.user.email).toBe(updatedEmail);
 
-    // Restore original state of user 3
+    // Restore original state of normalUser
     await request(app)
-      .patch('/api/admin/users/3')
+      .patch(`/api/admin/users/${normalUser.id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
         username: originalUsername,
@@ -197,7 +215,7 @@ describe('Admin User Management Feature Tests', () => {
   // 6. User Deletion Tests
   test('Standard USER cannot call DELETE /api/admin/users/:id (403 Forbidden)', async () => {
     const res = await request(app)
-      .delete('/api/admin/users/3')
+      .delete(`/api/admin/users/${normalUser.id}`)
       .set('Authorization', `Bearer ${userToken}`);
 
     expect(res.status).toBe(403);
@@ -206,7 +224,7 @@ describe('Admin User Management Feature Tests', () => {
 
   test('Admin cannot delete their own account (Self-deletion prevention)', async () => {
     const res = await request(app)
-      .delete('/api/admin/users/2') // admin user's own ID
+      .delete(`/api/admin/users/${adminUser.id}`) // admin user's own ID
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(400);
@@ -215,9 +233,8 @@ describe('Admin User Management Feature Tests', () => {
   });
 
   test('Admin cannot delete the primary root administrator account', async () => {
-    // If user 2 is admin@example.com
     const res = await request(app)
-      .delete('/api/admin/users/2')
+      .delete(`/api/admin/users/${rootAdminUser.id}`)
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(400);

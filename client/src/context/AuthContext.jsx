@@ -46,6 +46,16 @@ export function AuthProvider({ children }) {
     return receivedUser;
   };
 
+  const loginWithGoogle = async (credential) => {
+    const res = await api.post('/auth/google', { credential });
+    const { token: receivedToken, user: receivedUser } = res.data;
+    localStorage.setItem('token', receivedToken);
+    localStorage.setItem('user', JSON.stringify(receivedUser));
+    setToken(receivedToken);
+    setUser(receivedUser);
+    return receivedUser;
+  };
+
   const register = async (username, email, password) => {
     const res = await api.post('/auth/register', { username, email, password });
     const { token: receivedToken, user: receivedUser } = res.data;
@@ -85,6 +95,7 @@ export function AuthProvider({ children }) {
     isAuthenticated: Boolean(user && token),
     isAdmin: Boolean(user && user.role === 'ADMIN'),
     login,
+    loginWithGoogle,
     register,
     logout,
     refreshProfile
