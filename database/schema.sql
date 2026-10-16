@@ -16,9 +16,11 @@ CREATE TABLE IF NOT EXISTS `users` (
   `email` VARCHAR(255) NOT NULL UNIQUE,
   `password_hash` VARCHAR(255) NOT NULL,
   `role` ENUM('USER', 'ADMIN') NOT NULL DEFAULT 'USER',
+  `status` ENUM('ACTIVE', 'DELETED') NOT NULL DEFAULT 'ACTIVE',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_users_role` (`role`),
+  INDEX `idx_users_status` (`status`),
   INDEX `idx_users_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -125,7 +127,7 @@ CREATE TABLE IF NOT EXISTS `question_reports` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `question_id` INT NOT NULL,
   `reporter_id` INT NOT NULL,
-  `reason` ENUM('Incorrect Statement', 'Incorrect Sample Output', 'Incorrect Test Cases', 'Compilation Issue', 'Other') NOT NULL,
+  `reason` VARCHAR(100) NOT NULL,
   `details` TEXT,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`question_id`) REFERENCES `questions` (`id`) ON DELETE CASCADE,

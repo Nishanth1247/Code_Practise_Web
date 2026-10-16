@@ -9,6 +9,7 @@ router.use(authenticate, requireAdmin);
 router.get('/overview', adminController.getOverview);
 router.get('/questions/reported', adminController.getReportedQuestions);
 router.get('/questions/:id', adminController.getQuestionDetails);
+router.delete('/questions/:id', adminController.deleteQuestion);
 router.patch('/questions/:id/remove', adminController.removeQuestion);
 router.patch('/questions/:id/restore', adminController.restoreQuestion);
 router.get('/questions/audit/all', adminController.getAuditHistory);
@@ -17,6 +18,7 @@ router.get('/questions/audit/all', adminController.getAuditHistory);
 router.get('/users', adminController.getUsers);
 router.get('/users/:id', adminController.getUserById);
 router.patch('/users/:id', adminController.updateUser);
+router.delete('/users/:id', adminController.deleteUser);
 
 // Dynamic Level Management routes
 router.get('/languages/:languageId/levels', adminController.getLanguageLevels);

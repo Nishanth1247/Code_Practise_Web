@@ -52,18 +52,18 @@ export function AdminQuestionReviewPage() {
 
   const { question, samples, testCases, reports, auditLogs } = data;
 
-  // Handle Remove Question
-  const handleRemove = async () => {
+  // Handle Delete Question (soft delete to REMOVED)
+  const handleDelete = async () => {
     setActionLoading(true);
     try {
-      await api.patch(`/admin/questions/${id}/remove`, {
-        reason: actionReason || 'Removed by administrator after verification'
+      await api.delete(`/admin/questions/${id}`, {
+        data: { reason: actionReason || 'Deleted by administrator review' }
       });
       setIsRemoveModalOpen(false);
       setActionReason('');
       await loadDetails();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to remove question.');
+      alert(err.response?.data?.error || 'Failed to delete question.');
     } finally {
       setActionLoading(false);
     }
@@ -126,7 +126,7 @@ export function AdminQuestionReviewPage() {
                 className="px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
               >
                 <Trash2 className="w-4 h-4" />
-                Remove Question
+                Delete Question
               </button>
             )}
 
@@ -341,14 +341,14 @@ export function AdminQuestionReviewPage() {
         </div>
       )}
 
-      {/* Remove Confirmation Modal */}
+      {/* Delete Confirmation Modal */}
       <ConfirmationModal
         isOpen={isRemoveModalOpen}
         onClose={() => setIsRemoveModalOpen(false)}
-        onConfirm={handleRemove}
-        title="Remove Question from Practice"
-        message="This question will be set to REMOVED status and excluded globally from practice lists. All reports, submissions, and contributor records remain fully preserved."
-        confirmText="Remove Question"
+        onConfirm={handleDelete}
+        title="Delete Question from Platform"
+        message="This question will be set to REMOVED status and excluded globally from practice lists, submission evaluation, and catalog views. All reports, submissions, and contributor records remain fully preserved."
+        confirmText="Delete Question"
         isDanger={true}
         isLoading={actionLoading}
       />

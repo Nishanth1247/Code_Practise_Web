@@ -82,7 +82,7 @@ async function login(req, res, next) {
     const { email, password } = req.body;
 
     const users = await db.query(
-      'SELECT id, username, email, password_hash, role, created_at FROM users WHERE email = ?',
+      'SELECT id, username, email, password_hash, role, status, created_at FROM users WHERE email = ?',
       [email]
     );
 
@@ -94,6 +94,15 @@ async function login(req, res, next) {
     }
 
     const user = users[0];
+
+    // Reject deleted or deactivated accounts
+    if (user.status === 'DELETED') {
+      return res.status(403).json({
+        success: false,
+        error: 'This account has been deleted or deactivated. Please contact support.'
+      });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
       return res.status(401).json({

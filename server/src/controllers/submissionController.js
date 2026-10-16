@@ -23,6 +23,19 @@ async function runCode(req, res, next) {
       });
     }
 
+    // Verify question exists and is ACTIVE
+    const questionRows = await db.query(
+      'SELECT id, status FROM questions WHERE id = ?',
+      [questionId]
+    );
+
+    if (!questionRows || questionRows.length === 0 || questionRows[0].status !== 'ACTIVE') {
+      return res.status(404).json({
+        success: false,
+        error: 'This question is currently unavailable for practice or test runs.'
+      });
+    }
+
     // Fetch question and sample cases
     const samples = await db.query(
       'SELECT sample_input, expected_output, explanation FROM question_samples WHERE question_id = ? ORDER BY display_order ASC',
@@ -83,6 +96,19 @@ async function submitSolution(req, res, next) {
       return res.status(400).json({
         success: false,
         error: 'Source code exceeds maximum limit of 64KB.'
+      });
+    }
+
+    // Verify question exists and is ACTIVE
+    const questionRows = await db.query(
+      'SELECT id, status FROM questions WHERE id = ?',
+      [questionId]
+    );
+
+    if (!questionRows || questionRows.length === 0 || questionRows[0].status !== 'ACTIVE') {
+      return res.status(404).json({
+        success: false,
+        error: 'This question is currently unavailable for submissions.'
       });
     }
 

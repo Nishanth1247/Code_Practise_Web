@@ -54,7 +54,7 @@ describe('User Registration & Login Flow Tests', () => {
     };
 
     db.query.mockImplementation(async (sql) => {
-      if (sql.includes('SELECT id, username, email, password_hash, role, created_at FROM users WHERE email = ?')) {
+      if (sql.includes('FROM users WHERE email = ?')) {
         return [mockUser];
       }
       return [];
@@ -102,5 +102,38 @@ describe('User Registration & Login Flow Tests', () => {
     expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
     expect(res.body.error).toContain('Invalid email or password');
+  });
+
+  test('Login fails with 403 when user account has status DELETED', async () => {
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash('SecretPass123!', salt);
+
+    const mockDeletedUser = {
+      id: 55,
+      username: 'deleted_user',
+      email: 'deleted@example.com',
+      password_hash: hash,
+      role: 'USER',
+      status: 'DELETED',
+      created_at: new Date().toISOString()
+    };
+
+    db.query.mockImplementation(async (sql) => {
+      if (sql.includes('FROM users WHERE email = ?')) {
+        return [mockDeletedUser];
+      }
+      return [];
+    });
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({
+        email: 'deleted@example.com',
+        password: 'SecretPass123!'
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toContain('deleted or deactivated');
   });
 });

@@ -20,9 +20,11 @@ async function getOverview(req, res, next) {
  */
 async function getReportedQuestions(req, res, next) {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
+    const { status, category, reportCount, page = 1, limit = 20 } = req.query;
     const result = await adminService.getReportedQuestions({
       status: status || null,
+      category: category || null,
+      reportCount: reportCount || null,
       page: parseInt(page, 10),
       limit: parseInt(limit, 10)
     });
@@ -254,12 +256,49 @@ async function updateUser(req, res, next) {
   }
 }
 
+/**
+ * Delete a user account (safe soft deletion, preserving historical records)
+ */
+async function deleteUser(req, res, next) {
+  try {
+    const { id } = req.params;
+    const currentAdminId = req.user.id;
+    const result = await adminService.deleteUserAdmin(
+      parseInt(id, 10),
+      currentAdminId
+    );
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Delete / Remove a question from active practice (soft deletion preserving submissions & audit history)
+ */
+async function deleteQuestion(req, res, next) {
+  try {
+    const { id } = req.params;
+    const adminId = req.user.id;
+    const { reason } = req.body;
+    const result = await adminService.deleteQuestionAdmin({
+      questionId: parseInt(id, 10),
+      adminId,
+      reason
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getOverview,
   getReportedQuestions,
   getQuestionDetails,
   removeQuestion,
   restoreQuestion,
+  deleteQuestion,
   getAuditHistory,
   getLanguageLevels,
   createLevel,
@@ -268,6 +307,7 @@ module.exports = {
   deleteLevel,
   getUsers,
   getUserById,
-  updateUser
+  updateUser,
+  deleteUser
 };
 

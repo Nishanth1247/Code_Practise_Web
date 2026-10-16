@@ -40,9 +40,9 @@ async function authenticate(req, res, next) {
       });
     }
 
-    // Verify user exists and fetch current role
+    // Verify user exists and fetch current role & status
     const users = await db.query(
-      'SELECT id, username, email, role, created_at FROM users WHERE id = ?',
+      'SELECT id, username, email, role, status, created_at FROM users WHERE id = ?',
       [decoded.userId || decoded.id]
     );
 
@@ -50,6 +50,13 @@ async function authenticate(req, res, next) {
       return res.status(401).json({
         success: false,
         error: 'User account no longer exists.'
+      });
+    }
+
+    if (users[0].status === 'DELETED') {
+      return res.status(401).json({
+        success: false,
+        error: 'User account has been deactivated or deleted.'
       });
     }
 

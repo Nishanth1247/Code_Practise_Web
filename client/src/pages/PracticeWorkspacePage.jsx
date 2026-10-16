@@ -18,7 +18,10 @@ import {
   FileCode,
   Info,
   Sun,
-  Moon
+  Moon,
+  X,
+  AlertCircle,
+  AlertTriangle
 } from 'lucide-react';
 
 export function PracticeWorkspacePage() {
@@ -67,8 +70,10 @@ export function PracticeWorkspacePage() {
 
   // Report modal states
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-  const [reportReason, setReportReason] = useState('Incorrect Statement');
+  const [reportReason, setReportReason] = useState('Incorrect expected output');
   const [reportDetails, setReportDetails] = useState('');
+  const [expectedVsActual, setExpectedVsActual] = useState('');
+  const [reportError, setReportError] = useState('');
   const [isReporting, setIsReporting] = useState(false);
   const [reportNotification, setReportNotification] = useState(null);
 
@@ -275,21 +280,47 @@ export function PracticeWorkspacePage() {
     }
   };
 
-  // Submit Wrong-Question Report (Mandatory Replacement Workflow)
-  const handleSubmitReport = async () => {
+  // Submit Question Report with Mandatory Category & Feedback (Replacement Workflow)
+  const handleSubmitReport = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!isAuthenticated) {
       navigate('/login');
       return;
     }
 
+    const trimmedDetails = reportDetails.trim();
+    if (!reportReason) {
+      setReportError('Please select an issue category.');
+      return;
+    }
+
+    if (trimmedDetails.length < 20) {
+      setReportError(`Feedback explanation must be at least 20 characters (currently ${trimmedDetails.length} characters).`);
+      return;
+    }
+
+    if (trimmedDetails.length > 1000) {
+      setReportError('Feedback explanation cannot exceed 1000 characters.');
+      return;
+    }
+
+    setReportError('');
     setIsReporting(true);
+
+    const fullDetails = expectedVsActual.trim()
+      ? `${trimmedDetails}\n\n[Expected vs Actual]:\n${expectedVsActual.trim()}`
+      : trimmedDetails;
+
     try {
       const res = await api.post(`/questions/${question.id}/report`, {
         reason: reportReason,
-        details: reportDetails
+        details: fullDetails
       });
 
       setIsReportModalOpen(false);
+      setReportDetails('');
+      setExpectedVsActual('');
+      setReportError('');
 
       // Handle replacement workflow
       if (res.data.replacementQuestion) {
@@ -310,7 +341,7 @@ export function PracticeWorkspacePage() {
         });
       }
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to submit report.');
+      setReportError(err.response?.data?.error || err.response?.data?.errors?.[0]?.message || 'Failed to submit report.');
     } finally {
       setIsReporting(false);
     }
@@ -735,17 +766,156 @@ export function PracticeWorkspacePage() {
         </div>
       </div>
 
-      {/* Report Wrong Question Modal */}
-      <ConfirmationModal
-        isOpen={isReportModalOpen}
-        onClose={() => setIsReportModalOpen(false)}
-        onConfirm={handleSubmitReport}
-        title="Report Inaccurate Question"
-        message="Reporting this question will record your feedback and immediately provide you with an alternative practice question from this level."
-        confirmText={isReporting ? "Submitting..." : "Submit Report & Replace"}
-        isLoading={isReporting}
-        isDanger={true}
-      />
+      {/* Report Question Modal with Mandatory Issue Category & Detailed Feedback */}
+      {isReportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="relative w-full max-w-lg bg-white border border-[#DBEAFE] rounded-2xl shadow-xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 bg-[#F5F9FF] border-b border-[#DBEAFE] flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-rose-100 text-rose-600 rounded-xl border border-rose-200">
+                  <Flag className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#1E3A8A]">Report Question Problem</h3>
+                  <p className="text-xs text-[#64748B]">Help keep CodeCraft challenges accurate and high quality.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isReporting) {
+                    setIsReportModalOpen(false);
+                    setReportError('');
+                  }
+                }}
+                disabled={isReporting}
+                className="p-1.5 text-[#64748B] hover:text-[#172554] rounded-lg hover:bg-white transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSubmitReport} className="p-5 space-y-4">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <p>
+                  Reporting records your feedback and immediately provides you with an alternative practice question from this level. At 4 community reports, questions are automatically hidden for admin review.
+                </p>
+              </div>
+
+              {reportError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{reportError}</span>
+                </div>
+              )}
+
+              {/* Category Selector */}
+              <div>
+                <label className="block text-xs font-bold text-[#172554] uppercase tracking-wider mb-1.5">
+                  Issue Category *
+                </label>
+                <select
+                  required
+                  value={reportReason}
+                  onChange={(e) => {
+                    setReportReason(e.target.value);
+                    setReportError('');
+                  }}
+                  className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-xs text-[#172554] font-semibold focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                >
+                  <option value="Incorrect expected output">Incorrect expected output</option>
+                  <option value="Incorrect or incomplete test cases">Incorrect or incomplete test cases</option>
+                  <option value="Ambiguous problem statement">Ambiguous problem statement</option>
+                  <option value="Incorrect input/output format">Incorrect input/output format</option>
+                  <option value="Missing constraints or edge cases">Missing constraints or edge cases</option>
+                  <option value="Duplicate question">Duplicate question</option>
+                  <option value="Incorrect language or level">Incorrect language or level</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              {/* Detailed Feedback Field */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-[#172554] uppercase tracking-wider">
+                    Detailed Explanation *
+                  </label>
+                  <span className={`text-[11px] font-mono font-semibold ${
+                    reportDetails.trim().length >= 20 ? 'text-emerald-700' : 'text-amber-700'
+                  }`}>
+                    {reportDetails.trim().length} / 1000 (min 20)
+                  </span>
+                </div>
+                <textarea
+                  required
+                  rows={4}
+                  value={reportDetails}
+                  onChange={(e) => {
+                    setReportDetails(e.target.value);
+                    if (reportError) setReportError('');
+                  }}
+                  placeholder="Explain exactly what is wrong with the question (minimum 20 characters)... e.g. Test case 2 expects 10 instead of 15 due to off-by-one error..."
+                  className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl p-3 text-xs text-[#172554] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                />
+                {reportDetails.trim().length > 0 && reportDetails.trim().length < 20 && (
+                  <p className="text-[11px] text-amber-700 mt-1">
+                    Please provide {20 - reportDetails.trim().length} more characters of explanation.
+                  </p>
+                )}
+              </div>
+
+              {/* Optional Expected vs Actual */}
+              <div>
+                <label className="block text-xs font-bold text-[#64748B] uppercase tracking-wider mb-1">
+                  Expected vs Actual Output (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={expectedVsActual}
+                  onChange={(e) => setExpectedVsActual(e.target.value)}
+                  placeholder="e.g. Expected: '5 10', Actual output obtained: '10 5'"
+                  className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl p-2.5 text-xs text-[#172554] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#2563EB] font-mono"
+                />
+              </div>
+
+              {/* Modal Actions */}
+              <div className="pt-3 border-t border-[#DBEAFE] flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsReportModalOpen(false);
+                    setReportError('');
+                  }}
+                  disabled={isReporting}
+                  className="px-4 py-2 bg-white border border-[#DBEAFE] text-[#172554] text-xs font-semibold rounded-xl hover:bg-[#F5F9FF] transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isReporting || reportDetails.trim().length < 20 || !reportReason}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5"
+                >
+                  {isReporting ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <Flag className="w-3.5 h-3.5" />
+                      Submit Report & Replace Question
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

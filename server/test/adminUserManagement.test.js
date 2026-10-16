@@ -194,6 +194,71 @@ describe('Admin User Management Feature Tests', () => {
       });
   });
 
+  // 6. User Deletion Tests
+  test('Standard USER cannot call DELETE /api/admin/users/:id (403 Forbidden)', async () => {
+    const res = await request(app)
+      .delete('/api/admin/users/3')
+      .set('Authorization', `Bearer ${userToken}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('Admin cannot delete their own account (Self-deletion prevention)', async () => {
+    const res = await request(app)
+      .delete('/api/admin/users/2') // admin user's own ID
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toContain('cannot delete your own administrator account');
+  });
+
+  test('Admin cannot delete the primary root administrator account', async () => {
+    // If user 2 is admin@example.com
+    const res = await request(app)
+      .delete('/api/admin/users/2')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('Admin can soft-delete a test user, excluding them from active lists while preserving historical data', async () => {
+    // 1. Create a disposable test user directly in DB
+    const [createRes] = await db.getPool().query(`
+      INSERT INTO users (username, email, password_hash, role, status)
+      VALUES ('temp_delete_test', 'temp_delete@test.com', 'dummyhash123', 'USER', 'ACTIVE')
+    `);
+    const testUserId = createRes.insertId;
+
+    try {
+      // 2. Admin soft-deletes the user
+      const deleteRes = await request(app)
+        .delete(`/api/admin/users/${testUserId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(deleteRes.status).toBe(200);
+      expect(deleteRes.body.success).toBe(true);
+      expect(deleteRes.body.status).toBe('DELETED');
+
+      // 3. User is excluded from active user list
+      const listRes = await request(app)
+        .get('/api/admin/users?search=temp_delete_test')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(listRes.body.users.length).toBe(0);
+
+      // 4. Verify record still exists in DB with status = 'DELETED'
+      const [userRows] = await db.getPool().query('SELECT id, status FROM users WHERE id = ?', [testUserId]);
+      expect(userRows.length).toBe(1);
+      expect(userRows[0].status).toBe('DELETED');
+    } finally {
+      // Clean up test record completely
+      await db.getPool().query('DELETE FROM users WHERE id = ?', [testUserId]);
+    }
+  });
+
   afterAll(async () => {
     const pool = db.getPool();
     if (pool) {

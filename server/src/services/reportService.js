@@ -2,12 +2,49 @@ const db = require('../config/db');
 
 const REPORT_THRESHOLD = 4;
 
+const ALLOWED_REPORT_CATEGORIES = [
+  'Incorrect expected output',
+  'Incorrect or incomplete test cases',
+  'Ambiguous problem statement',
+  'Incorrect input/output format',
+  'Missing constraints or edge cases',
+  'Duplicate question',
+  'Incorrect language or level',
+  'Other',
+  // Backward compatibility with legacy category values
+  'Incorrect Statement',
+  'Incorrect Sample Output',
+  'Incorrect Test Cases',
+  'Compilation Issue'
+];
+
 /**
  * Handle submitting a wrong-question report
  * Implements the atomic threshold check (4 distinct users -> PENDING_REVIEW)
  * and immediately finds an eligible replacement question for the reporting user.
  */
 async function submitQuestionReport({ questionId, userId, reason, details = '' }) {
+  const trimmedReason = reason ? String(reason).trim() : '';
+  const trimmedDetails = details ? String(details).trim() : '';
+
+  if (!trimmedReason || !ALLOWED_REPORT_CATEGORIES.includes(trimmedReason)) {
+    const err = new Error('Please select a valid report issue category.');
+    err.status = 400;
+    throw err;
+  }
+
+  if (!trimmedDetails || trimmedDetails.length < 20) {
+    const err = new Error('Detailed feedback explanation must be at least 20 characters.');
+    err.status = 400;
+    throw err;
+  }
+
+  if (trimmedDetails.length > 1000) {
+    const err = new Error('Detailed feedback explanation cannot exceed 1000 characters.');
+    err.status = 400;
+    throw err;
+  }
+
   return await db.withTransaction(async (conn) => {
     // 1. Fetch and lock question row
     const [questions] = await conn.query(

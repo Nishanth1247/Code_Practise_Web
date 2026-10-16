@@ -53,18 +53,34 @@ async function getAdminOverview() {
 /**
  * Fetch list of reported questions (both PENDING_REVIEW and ACTIVE questions with reports)
  */
-async function getReportedQuestions({ status = null, page = 1, limit = 20 }) {
-  const offset = (page - 1) * limit;
-  let statusClause = '';
+async function getReportedQuestions({ status = null, category = null, reportCount = null, page = 1, limit = 20 } = {}) {
+  const safePage = Math.max(1, parseInt(page, 10) || 1);
+  const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const offset = (safePage - 1) * safeLimit;
+
+  const conditions = [];
   const params = [];
 
   if (status) {
-    statusClause = 'WHERE q.status = ?';
+    conditions.push('q.status = ?');
     params.push(status);
+  }
+
+  if (category) {
+    conditions.push('q.id IN (SELECT DISTINCT qr_sub.question_id FROM question_reports qr_sub WHERE qr_sub.reason = ?)');
+    params.push(category);
   } else {
     // Default: show questions that have reports
-    statusClause = 'WHERE q.id IN (SELECT DISTINCT question_id FROM question_reports)';
+    conditions.push('q.id IN (SELECT DISTINCT question_id FROM question_reports)');
   }
+
+  if (reportCount === 'threshold' || reportCount === '4+') {
+    conditions.push('(SELECT COUNT(DISTINCT qr_cnt.reporter_id) FROM question_reports qr_cnt WHERE qr_cnt.question_id = q.id) >= 4');
+  } else if (reportCount === 'under_threshold' || reportCount === '1-3') {
+    conditions.push('(SELECT COUNT(DISTINCT qr_cnt.reporter_id) FROM question_reports qr_cnt WHERE qr_cnt.question_id = q.id) < 4');
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const questions = await db.query(`
     SELECT
@@ -73,6 +89,7 @@ async function getReportedQuestions({ status = null, page = 1, limit = 20 }) {
       q.status,
       q.created_at,
       l.name AS language_name,
+      l.slug AS language_slug,
       lvl.level_number,
       lvl.title AS level_title,
       u.username AS contributor_username,
@@ -82,30 +99,67 @@ async function getReportedQuestions({ status = null, page = 1, limit = 20 }) {
     JOIN levels lvl ON q.level_id = lvl.id
     JOIN users u ON q.contributor_id = u.id
     LEFT JOIN question_reports qr ON q.id = qr.question_id
-    ${statusClause}
-    GROUP BY q.id, l.name, lvl.level_number, lvl.title, u.username
+    ${whereClause}
+    GROUP BY q.id, l.name, l.slug, lvl.level_number, lvl.title, u.username
     ORDER BY
       CASE WHEN q.status = 'PENDING_REVIEW' THEN 0 WHEN q.status = 'ACTIVE' THEN 1 ELSE 2 END,
       distinct_report_count DESC,
       q.created_at DESC
     LIMIT ? OFFSET ?
-  `, [...params, limit, offset]);
+  `, [...params, safeLimit, offset]);
 
   const totalCountRows = await db.query(`
     SELECT COUNT(DISTINCT q.id) AS total
     FROM questions q
-    ${statusClause}
+    ${whereClause}
   `, params);
 
   const total = (totalCountRows && totalCountRows.length > 0) ? totalCountRows[0].total : 0;
 
+  // Fetch full report feedbacks for the retrieved questions so admin can inspect without page transitions
+  if (questions.length > 0) {
+    const questionIds = questions.map(q => q.id);
+    const reportRows = await db.query(`
+      SELECT
+        qr.id,
+        qr.question_id,
+        qr.reason,
+        qr.details,
+        qr.created_at,
+        u.username AS reporter_username
+      FROM question_reports qr
+      JOIN users u ON qr.reporter_id = u.id
+      WHERE qr.question_id IN (?)
+      ORDER BY qr.created_at DESC
+    `, [questionIds]);
+
+    const reportsByQuestion = {};
+    for (const r of reportRows) {
+      if (!reportsByQuestion[r.question_id]) {
+        reportsByQuestion[r.question_id] = [];
+      }
+      reportsByQuestion[r.question_id].push({
+        id: r.id,
+        reason: r.reason,
+        details: r.details,
+        reporterUsername: r.reporter_username,
+        createdAt: r.created_at
+      });
+    }
+
+    for (const q of questions) {
+      q.reports = reportsByQuestion[q.id] || [];
+      q.categories = [...new Set(q.reports.map(r => r.reason))];
+    }
+  }
+
   return {
     questions,
     pagination: {
-      page,
-      limit,
+      page: safePage,
+      limit: safeLimit,
       total,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / safeLimit) || 1
     }
   };
 }
@@ -626,7 +680,7 @@ async function deleteLevelAdmin(levelId) {
 /**
  * List registered users with search, role filter, sorting, and pagination for Admin Console
  */
-async function getUsersAdmin({ search = '', role = '', page = 1, limit = 20, sort = 'newest' } = {}) {
+async function getUsersAdmin({ search = '', role = '', status = '', page = 1, limit = 20, sort = 'newest' } = {}) {
   const safePage = Math.max(1, parseInt(page, 10) || 1);
   const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
   const offset = (safePage - 1) * safeLimit;
@@ -645,6 +699,16 @@ async function getUsersAdmin({ search = '', role = '', page = 1, limit = 20, sor
     params.push(role.toUpperCase());
   }
 
+  // Handle account status filter (defaults to active accounts so deleted users disappear)
+  if (status && status.toUpperCase() === 'DELETED') {
+    conditions.push("u.status = 'DELETED'");
+  } else if (status && status.toUpperCase() === 'ALL') {
+    // Show all accounts
+  } else {
+    // Default active accounts
+    conditions.push("(u.status = 'ACTIVE' OR u.status IS NULL)");
+  }
+
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   let orderClause = 'u.created_at DESC';
@@ -660,13 +724,14 @@ async function getUsersAdmin({ search = '', role = '', page = 1, limit = 20, sor
   );
   const total = parseInt(countRows[0]?.total || 0, 10);
 
-  // Overall platform user role distribution
+  // Overall platform user role distribution (active users)
   const roleCounts = await db.query(`
     SELECT
       COUNT(*) AS total_all,
       SUM(CASE WHEN role = 'ADMIN' THEN 1 ELSE 0 END) AS total_admins,
       SUM(CASE WHEN role = 'USER' THEN 1 ELSE 0 END) AS total_users
     FROM users
+    WHERE status = 'ACTIVE' OR status IS NULL
   `);
 
   // Query users without exposing password_hash
@@ -677,6 +742,7 @@ async function getUsersAdmin({ search = '', role = '', page = 1, limit = 20, sor
       u.username,
       u.email,
       u.role,
+      u.status,
       u.created_at,
       u.updated_at,
       (SELECT COUNT(*) FROM user_solved_questions usq WHERE usq.user_id = u.id) AS solved_count,
@@ -696,7 +762,7 @@ async function getUsersAdmin({ search = '', role = '', page = 1, limit = 20, sor
       username: u.username,
       email: u.email,
       role: u.role,
-      status: 'ACTIVE',
+      status: u.status || 'ACTIVE',
       createdAt: u.created_at,
       updatedAt: u.updated_at,
       solvedCount: parseInt(u.solved_count || 0, 10),
@@ -728,6 +794,7 @@ async function getUserByIdAdmin(userId) {
       u.username,
       u.email,
       u.role,
+      u.status,
       u.created_at,
       u.updated_at,
       (SELECT COUNT(*) FROM user_solved_questions usq WHERE usq.user_id = u.id) AS solved_count,
@@ -751,7 +818,7 @@ async function getUserByIdAdmin(userId) {
     username: u.username,
     email: u.email,
     role: u.role,
-    status: 'ACTIVE',
+    status: u.status || 'ACTIVE',
     createdAt: u.created_at,
     updatedAt: u.updated_at,
     solvedCount: parseInt(u.solved_count || 0, 10),
@@ -766,7 +833,7 @@ async function getUserByIdAdmin(userId) {
  */
 async function updateUserAdmin(userId, updateData = {}, currentAdminUserId) {
   const existingRows = await db.query(
-    'SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?',
+    'SELECT id, username, email, role, status, created_at, updated_at FROM users WHERE id = ?',
     [userId]
   );
 
@@ -859,11 +926,133 @@ async function updateUserAdmin(userId, updateData = {}, currentAdminUserId) {
       username: newUsername,
       email: newEmail,
       role: newRole,
-      status: 'ACTIVE',
+      status: existing.status || 'ACTIVE',
       createdAt: existing.created_at,
       updatedAt: new Date().toISOString()
     }
   };
+}
+
+/**
+ * Delete a user account (safe soft deletion)
+ * Marks user as 'DELETED' so user immediately disappears from the active user list,
+ * while strictly preserving all historical submissions, solved records, questions contributed,
+ * votes, reports, and audit logs without foreign-key cascade destruction.
+ */
+async function deleteUserAdmin(userId, currentAdminUserId) {
+  if (!userId || isNaN(userId) || parseInt(userId, 10) < 1) {
+    const error = new Error('Invalid user ID.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const targetId = parseInt(userId, 10);
+  const adminId = parseInt(currentAdminUserId, 10);
+
+  // Self-deletion safeguard
+  if (targetId === adminId) {
+    const error = new Error('You cannot delete your own administrator account.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const existingRows = await db.query(
+    'SELECT id, username, email, role, status FROM users WHERE id = ?',
+    [targetId]
+  );
+
+  if (!existingRows || existingRows.length === 0) {
+    const error = new Error('User not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const targetUser = existingRows[0];
+
+  // Primary system administrator safeguard
+  if (targetUser.email === 'admin@example.com') {
+    const error = new Error('The primary system administrator account cannot be deleted.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Safeguard against deleting the last remaining active administrator
+  if (targetUser.role === 'ADMIN') {
+    const adminCountRows = await db.query(
+      "SELECT COUNT(*) AS total FROM users WHERE role = 'ADMIN' AND (status = 'ACTIVE' OR status IS NULL) AND id != ?",
+      [targetId]
+    );
+    const remainingAdmins = parseInt(adminCountRows[0]?.total || 0, 10);
+    if (remainingAdmins === 0) {
+      const error = new Error('Cannot delete the last active administrator account.');
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  // Soft delete: marks status as 'DELETED'
+  await db.query(
+    "UPDATE users SET status = 'DELETED', updated_at = NOW() WHERE id = ?",
+    [targetId]
+  );
+
+  return {
+    success: true,
+    message: `User account "${targetUser.username}" (${targetUser.email}) has been successfully deleted.`,
+    deletedUserId: targetId,
+    status: 'DELETED'
+  };
+}
+
+/**
+ * Delete a question from active practice
+ * Sets status to 'REMOVED' and logs the audit event.
+ * Preserves all historical submissions, tests, reports, and solutions.
+ * Permanently prevents question from being loaded for practice or accepting new submissions.
+ */
+async function deleteQuestionAdmin({ questionId, adminId, reason = 'Deleted by administrator' }) {
+  if (!questionId || isNaN(questionId) || parseInt(questionId, 10) < 1) {
+    const error = new Error('Invalid question ID.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const qId = parseInt(questionId, 10);
+
+  return await db.withTransaction(async (conn) => {
+    const [questions] = await conn.query(
+      'SELECT id, title, status FROM questions WHERE id = ? FOR UPDATE',
+      [qId]
+    );
+
+    if (!questions || questions.length === 0) {
+      const err = new Error('Question not found.');
+      err.statusCode = 404;
+      err.status = 404;
+      throw err;
+    }
+
+    const currentQuestion = questions[0];
+    const previousStatus = currentQuestion.status;
+
+    await conn.query(
+      'UPDATE questions SET status = ? WHERE id = ?',
+      ['REMOVED', qId]
+    );
+
+    await conn.query(
+      'INSERT INTO question_audit_logs (question_id, admin_id, previous_status, new_status, reason) VALUES (?, ?, ?, ?, ?)',
+      [qId, adminId, previousStatus, 'REMOVED', reason || 'Deleted by administrator']
+    );
+
+    return {
+      success: true,
+      message: `Question #${qId} ("${currentQuestion.title}") has been deleted and removed from active practice. All historical submissions, test cases, and audit logs are safely preserved.`,
+      questionId: qId,
+      previousStatus,
+      status: 'REMOVED'
+    };
+  });
 }
 
 module.exports = {
@@ -872,6 +1061,7 @@ module.exports = {
   getAdminQuestionDetails,
   removeQuestion,
   restoreQuestion,
+  deleteQuestionAdmin,
   getAuditHistory,
   getLanguageLevelsAdmin,
   createLanguageLevelAdmin,
@@ -880,6 +1070,7 @@ module.exports = {
   deleteLevelAdmin,
   getUsersAdmin,
   getUserByIdAdmin,
-  updateUserAdmin
+  updateUserAdmin,
+  deleteUserAdmin
 };
 

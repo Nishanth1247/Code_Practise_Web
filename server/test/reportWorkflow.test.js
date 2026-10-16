@@ -1,4 +1,5 @@
 const reportService = require('../src/services/reportService');
+const adminService = require('../src/services/adminService');
 const db = require('../src/config/db');
 
 // Mock db module for isolated unit testing
@@ -7,6 +8,37 @@ jest.mock('../src/config/db');
 describe('Reporting and Replacement Workflow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  test('Report rejected when detailed feedback is missing or under 20 characters', async () => {
+    await expect(
+      reportService.submitQuestionReport({
+        questionId: 10,
+        userId: 1,
+        reason: 'Incorrect expected output',
+        details: '' // Missing
+      })
+    ).rejects.toThrow('Detailed feedback explanation must be at least 20 characters.');
+
+    await expect(
+      reportService.submitQuestionReport({
+        questionId: 10,
+        userId: 1,
+        reason: 'Incorrect expected output',
+        details: 'Too short' // 9 characters
+      })
+    ).rejects.toThrow('Detailed feedback explanation must be at least 20 characters.');
+  });
+
+  test('Report rejected when issue category is not in allowed list', async () => {
+    await expect(
+      reportService.submitQuestionReport({
+        questionId: 10,
+        userId: 1,
+        reason: 'Invalid Random Category',
+        details: 'This is a long enough explanation of the problem, well over twenty chars.'
+      })
+    ).rejects.toThrow('Please select a valid report issue category.');
   });
 
   test('User cannot report their own question', async () => {
@@ -26,7 +58,8 @@ describe('Reporting and Replacement Workflow', () => {
       reportService.submitQuestionReport({
         questionId: 10,
         userId: 42, // same user as contributor
-        reason: 'Incorrect Statement'
+        reason: 'Incorrect expected output',
+        details: 'The test case expected output differs significantly from standard math rules.'
       })
     ).rejects.toThrow('You cannot report a question that you contributed.');
   });
@@ -51,7 +84,8 @@ describe('Reporting and Replacement Workflow', () => {
       reportService.submitQuestionReport({
         questionId: 10,
         userId: 1,
-        reason: 'Incorrect Statement'
+        reason: 'Ambiguous problem statement',
+        details: 'The description contradicts the sample output provided in the second test case.'
       })
     ).rejects.toThrow('You have already submitted a report for this question.');
   });
@@ -89,8 +123,8 @@ describe('Reporting and Replacement Workflow', () => {
     const result = await reportService.submitQuestionReport({
       questionId: 10,
       userId: 1,
-      reason: 'Incorrect Statement',
-      details: 'Typo in statement'
+      reason: 'Incorrect expected output',
+      details: 'Test case 3 expects 42 but according to specification it should be 43.'
     });
 
     expect(result.success).toBe(true);
@@ -142,8 +176,8 @@ describe('Reporting and Replacement Workflow', () => {
     const result = await reportService.submitQuestionReport({
       questionId: 10,
       userId: 4,
-      reason: 'Incorrect Test Cases',
-      details: 'Fails on hidden edge cases'
+      reason: 'Incorrect or incomplete test cases',
+      details: 'Fails on hidden edge cases when integer overflow is not accounted for.'
     });
 
     expect(result.success).toBe(true);
@@ -181,12 +215,48 @@ describe('Reporting and Replacement Workflow', () => {
     const result = await reportService.submitQuestionReport({
       questionId: 10,
       userId: 2,
-      reason: 'Incorrect Statement'
+      reason: 'Missing constraints or edge cases',
+      details: 'The problem statement neglects to specify constraints on negative numbers.'
     });
 
     expect(result.success).toBe(true);
     expect(result.replacementQuestion).toBeNull();
     expect(result.noReplacementAvailable).toBe(true);
     expect(result.fallbackMessage).toContain('No additional practice questions');
+  });
+
+  test('Admin can soft-delete question via deleteQuestionAdmin, transitioning status to REMOVED', async () => {
+    let updateStatus = null;
+    let loggedAudit = false;
+
+    const mockConn = {
+      query: jest.fn().mockImplementation((sql, params) => {
+        if (sql.includes('SELECT id, title, status FROM questions WHERE id = ?')) {
+          return [[{ id: 88, title: 'Flawed Question', status: 'ACTIVE' }]];
+        }
+        if (sql.includes('UPDATE questions SET status = ? WHERE id = ?')) {
+          updateStatus = params[0];
+          return [{ affectedRows: 1 }];
+        }
+        if (sql.includes('INSERT INTO question_audit_logs')) {
+          loggedAudit = true;
+          return [{ insertId: 1 }];
+        }
+        return [[]];
+      })
+    };
+
+    db.withTransaction.mockImplementation((callback) => callback(mockConn));
+
+    const result = await adminService.deleteQuestionAdmin({
+      questionId: 88,
+      adminId: 1,
+      reason: 'Inaccurate constraints confirmed'
+    });
+    expect(result.success).toBe(true);
+    expect(result.questionId).toBe(88);
+    expect(result.status).toBe('REMOVED');
+    expect(updateStatus).toBe('REMOVED');
+    expect(loggedAudit).toBe(true);
   });
 });

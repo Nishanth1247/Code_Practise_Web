@@ -89,6 +89,32 @@ async function runMigrations() {
         await connection.query(`ALTER TABLE \`levels\` ADD COLUMN \`enabled\` BOOLEAN NOT NULL DEFAULT TRUE;`);
         console.log('[MIGRATION] Added enabled column to levels table successfully.');
       }
+
+      // Check users table for status column
+      const [userStatusCols] = await connection.query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND COLUMN_NAME = 'status'
+      `, [config.db.database]);
+
+      if (userStatusCols.length === 0) {
+        console.log('[MIGRATION] Adding status column to users table...');
+        await connection.query(`ALTER TABLE \`users\` ADD COLUMN \`status\` ENUM('ACTIVE', 'DELETED') NOT NULL DEFAULT 'ACTIVE';`);
+        console.log('[MIGRATION] Added status column to users table successfully.');
+      }
+
+      // Check question_reports table for reason column type
+      const [reportReasonCols] = await connection.query(`
+        SELECT COLUMN_TYPE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'question_reports' AND COLUMN_NAME = 'reason'
+      `, [config.db.database]);
+
+      if (reportReasonCols.length > 0 && reportReasonCols[0].COLUMN_TYPE.startsWith('enum')) {
+        console.log('[MIGRATION] Modifying question_reports.reason to VARCHAR(100)...');
+        await connection.query(`ALTER TABLE \`question_reports\` MODIFY COLUMN \`reason\` VARCHAR(100) NOT NULL;`);
+        console.log('[MIGRATION] Modified question_reports.reason to VARCHAR(100) successfully.');
+      }
     } catch (migErr) {
       console.warn('[MIGRATION NOTICE] Column compatibility check note:', migErr.message);
     }

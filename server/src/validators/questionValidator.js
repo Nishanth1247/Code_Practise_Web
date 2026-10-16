@@ -64,21 +64,33 @@ const validateCreateQuestion = [
   handleValidationErrors
 ];
 
+const ALLOWED_REPORT_CATEGORIES = [
+  'Incorrect expected output',
+  'Incorrect or incomplete test cases',
+  'Ambiguous problem statement',
+  'Incorrect input/output format',
+  'Missing constraints or edge cases',
+  'Duplicate question',
+  'Incorrect language or level',
+  'Other',
+  // Backward compatibility with legacy category values
+  'Incorrect Statement',
+  'Incorrect Sample Output',
+  'Incorrect Test Cases',
+  'Compilation Issue'
+];
+
 const validateReport = [
   body('reason')
-    .isIn([
-      'Incorrect Statement',
-      'Incorrect Sample Output',
-      'Incorrect Test Cases',
-      'Compilation Issue',
-      'Other'
-    ])
-    .withMessage('Please select a valid report reason'),
-  body('details')
-    .optional({ checkFalsy: true })
     .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Details must be under 1000 characters'),
+    .isIn(ALLOWED_REPORT_CATEGORIES)
+    .withMessage('Please select a valid report issue category'),
+  body('details')
+    .trim()
+    .notEmpty()
+    .withMessage('Feedback explanation is required')
+    .isLength({ min: 20, max: 1000 })
+    .withMessage('Detailed feedback must be between 20 and 1000 characters'),
   handleValidationErrors
 ];
 
