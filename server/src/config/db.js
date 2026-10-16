@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const mysql = require('mysql2/promise');
 const config = require('./env');
 
@@ -21,10 +22,29 @@ function getSslConfig() {
   if (config.db.sslCa) {
     let caContent = config.db.sslCa;
 
-    // Check if sslCa is a path to an existing certificate file
+    // Check if sslCa is a path to an existing certificate file or relative path
     try {
-      if (typeof caContent === 'string' && fs.existsSync(caContent)) {
-        caContent = fs.readFileSync(caContent, 'utf8');
+      if (typeof caContent === 'string' && !caContent.includes('-----BEGIN CERTIFICATE-----')) {
+        // Build candidate paths considering different cwd contexts (root or server dir)
+        const candidates = [
+          path.isAbsolute(caContent) ? caContent : null,
+          path.resolve(process.cwd(), caContent),
+          path.resolve(__dirname, '../../', caContent), // relative to server/
+          path.resolve(__dirname, '../../../', caContent), // relative to project root
+          // Handle when caContent has 'server/' prefix but cwd is already inside server/
+          caContent.startsWith('./server/') || caContent.startsWith('server/')
+            ? path.resolve(__dirname, '../../', caContent.replace(/^(\.\/)?server\//, ''))
+            : null,
+          // Handle when caContent is 'ca.pem' or './ca.pem' residing in server/
+          path.resolve(__dirname, '../../ca.pem')
+        ].filter(Boolean);
+
+        for (const candidate of candidates) {
+          if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+            caContent = fs.readFileSync(candidate, 'utf8');
+            break;
+          }
+        }
       }
     } catch (e) {
       // If filesystem check fails, treat as raw certificate string
