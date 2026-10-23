@@ -23,6 +23,8 @@ import { UserProfilePage } from './pages/UserProfilePage';
 
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
+import { AdminQuestionsPage } from './pages/AdminQuestionsPage';
+import { AdminProgramsPage } from './pages/AdminProgramsPage';
 import { AdminLevelsPage } from './pages/AdminLevelsPage';
 import { AdminReportedQuestionsPage } from './pages/AdminReportedQuestionsPage';
 import { AdminQuestionReviewPage } from './pages/AdminQuestionReviewPage';
@@ -93,6 +95,8 @@ export function App() {
           }
         >
           <Route index element={<AdminDashboardPage />} />
+          <Route path="questions" element={<AdminQuestionsPage />} />
+          <Route path="programs" element={<AdminProgramsPage />} />
           <Route path="users" element={<AdminUsersPage />} />
           <Route path="levels" element={<AdminLevelsPage />} />
           <Route path="reported" element={<AdminReportedQuestionsPage />} />

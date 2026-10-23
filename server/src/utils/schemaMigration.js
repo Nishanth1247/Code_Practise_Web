@@ -241,6 +241,74 @@ async function runIdempotentMigrations(connection, databaseName) {
     changes.push("Dropped deprecated index 'idx_questions_difficulty'.");
   }
 
+  // ---------------------------------------------------------------------------
+  // 7. Ensure `programs` table exists
+  // ---------------------------------------------------------------------------
+  const [programTables] = await connection.query(`
+    SELECT TABLE_NAME
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'programs'
+  `, [dbName]);
+
+  if (programTables.length === 0) {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`programs\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`name\` VARCHAR(100) NOT NULL UNIQUE,
+        \`slug\` VARCHAR(100) NOT NULL UNIQUE,
+        \`description\` TEXT,
+        \`status\` ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+        \`created_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX \`idx_programs_status\` (\`status\`),
+        INDEX \`idx_programs_slug\` (\`slug\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    changes.push("Created 'programs' table for persistent practice tracks.");
+  }
+
+  // ---------------------------------------------------------------------------
+  // 8. Ensure `program_languages` junction table exists
+  // ---------------------------------------------------------------------------
+  const [progLangTables] = await connection.query(`
+    SELECT TABLE_NAME
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'program_languages'
+  `, [dbName]);
+
+  if (progLangTables.length === 0) {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`program_languages\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`program_id\` INT NOT NULL,
+        \`language_id\` INT NOT NULL,
+        \`created_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (\`program_id\`) REFERENCES \`programs\` (\`id\`) ON DELETE CASCADE,
+        FOREIGN KEY (\`language_id\`) REFERENCES \`languages\` (\`id\`) ON DELETE CASCADE,
+        UNIQUE KEY \`unique_program_language\` (\`program_id\`, \`language_id\`),
+        INDEX \`idx_program_languages_lang\` (\`language_id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    changes.push("Created 'program_languages' junction table.");
+  }
+
+  // ---------------------------------------------------------------------------
+  // 9. Ensure `question_audit_logs.changed_fields` column exists
+  // ---------------------------------------------------------------------------
+  const [auditChangedFieldsCols] = await connection.query(`
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'question_audit_logs' AND COLUMN_NAME = 'changed_fields'
+  `, [dbName]);
+
+  if (auditChangedFieldsCols.length === 0) {
+    await connection.query(`
+      ALTER TABLE \`question_audit_logs\`
+      ADD COLUMN \`changed_fields\` TEXT NULL AFTER \`reason\`;
+    `);
+    changes.push("Added 'changed_fields' column to 'question_audit_logs' table.");
+  }
+
   return {
     success: true,
     database: dbName,

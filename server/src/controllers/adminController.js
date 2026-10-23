@@ -292,10 +292,139 @@ async function deleteQuestion(req, res, next) {
   }
 }
 
+/**
+ * List all questions with filtering by search, language, level, and status
+ */
+async function getQuestions(req, res, next) {
+  try {
+    const { search, languageId, levelId, status, page, limit, sort } = req.query;
+    const result = await adminService.getQuestionsAdmin({
+      search,
+      languageId,
+      levelId,
+      status,
+      page,
+      limit,
+      sort
+    });
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Update an existing question
+ */
+async function updateQuestion(req, res, next) {
+  try {
+    const { id } = req.params;
+    const adminId = req.user.id;
+    const result = await adminService.updateQuestionAdmin(
+      parseInt(id, 10),
+      req.body,
+      adminId
+    );
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * List all programs
+ */
+async function getPrograms(req, res, next) {
+  try {
+    const { search, status, page, limit } = req.query;
+    const result = await adminService.getProgramsAdmin({
+      search,
+      status,
+      page,
+      limit
+    });
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Get program by ID with details
+ */
+async function getProgramById(req, res, next) {
+  try {
+    const { id } = req.params;
+    const result = await adminService.getProgramByIdAdmin(parseInt(id, 10));
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Create a new program
+ */
+async function createProgram(req, res, next) {
+  try {
+    const adminId = req.user.id;
+    const result = await adminService.createProgramAdmin(req.body, adminId);
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Update a program
+ */
+async function updateProgram(req, res, next) {
+  try {
+    const { id } = req.params;
+    const adminId = req.user.id;
+    const result = await adminService.updateProgramAdmin(
+      parseInt(id, 10),
+      req.body,
+      adminId
+    );
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Delete a program
+ */
+async function deleteProgram(req, res, next) {
+  try {
+    const { id } = req.params;
+    const adminId = req.user.id;
+    const result = await adminService.deleteProgramAdmin(
+      parseInt(id, 10),
+      adminId
+    );
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getOverview,
   getReportedQuestions,
+  getQuestions,
   getQuestionDetails,
+  updateQuestion,
   removeQuestion,
   restoreQuestion,
   deleteQuestion,
@@ -308,6 +437,11 @@ module.exports = {
   getUsers,
   getUserById,
   updateUser,
-  deleteUser
+  deleteUser,
+  getPrograms,
+  getProgramById,
+  createProgram,
+  updateProgram,
+  deleteProgram
 };
 

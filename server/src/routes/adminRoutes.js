@@ -7,12 +7,23 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 router.use(authenticate, requireAdmin);
 
 router.get('/overview', adminController.getOverview);
+router.get('/questions', adminController.getQuestions);
 router.get('/questions/reported', adminController.getReportedQuestions);
 router.get('/questions/:id', adminController.getQuestionDetails);
+router.patch('/questions/:id', adminController.updateQuestion);
+router.put('/questions/:id', adminController.updateQuestion);
 router.delete('/questions/:id', adminController.deleteQuestion);
 router.patch('/questions/:id/remove', adminController.removeQuestion);
 router.patch('/questions/:id/restore', adminController.restoreQuestion);
 router.get('/questions/audit/all', adminController.getAuditHistory);
+
+// Program Management routes
+router.get('/programs', adminController.getPrograms);
+router.post('/programs', adminController.createProgram);
+router.get('/programs/:id', adminController.getProgramById);
+router.patch('/programs/:id', adminController.updateProgram);
+router.put('/programs/:id', adminController.updateProgram);
+router.delete('/programs/:id', adminController.deleteProgram);
 
 // User Management routes
 router.get('/users', adminController.getUsers);

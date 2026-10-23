@@ -230,6 +230,7 @@ async function getAdminQuestionDetails(questionId) {
       al.previous_status,
       al.new_status,
       al.reason,
+      al.changed_fields,
       al.created_at,
       u.username AS admin_username
     FROM question_audit_logs al
@@ -237,6 +238,16 @@ async function getAdminQuestionDetails(questionId) {
     WHERE al.question_id = ?
     ORDER BY al.created_at DESC
   `, [questionId]);
+
+  // Starter code templates
+  const starterTemplates = await db.query(
+    'SELECT language_slug, code FROM starter_code_templates WHERE question_id = ?',
+    [questionId]
+  );
+  const starterCode = {};
+  for (const st of starterTemplates) {
+    starterCode[st.language_slug] = st.code;
+  }
 
   // Recent Submissions summary
   const submissions = await db.query(`
@@ -260,6 +271,7 @@ async function getAdminQuestionDetails(questionId) {
     question,
     samples,
     testCases,
+    starterCode,
     reports,
     auditLogs,
     submissions
@@ -1035,14 +1047,26 @@ async function deleteQuestionAdmin({ questionId, adminId, reason = 'Deleted by a
     const currentQuestion = questions[0];
     const previousStatus = currentQuestion.status;
 
+    // If question is already removed, return status without redundant update
+    if (currentQuestion.status === 'REMOVED') {
+      return {
+        success: true,
+        message: `Question #${qId} ("${currentQuestion.title}") is already removed from active practice.`,
+        questionId: qId,
+        previousStatus: 'REMOVED',
+        status: 'REMOVED',
+        alreadyRemoved: true
+      };
+    }
+
     await conn.query(
       'UPDATE questions SET status = ? WHERE id = ?',
       ['REMOVED', qId]
     );
 
     await conn.query(
-      'INSERT INTO question_audit_logs (question_id, admin_id, previous_status, new_status, reason) VALUES (?, ?, ?, ?, ?)',
-      [qId, adminId, previousStatus, 'REMOVED', reason || 'Deleted by administrator']
+      'INSERT INTO question_audit_logs (question_id, admin_id, previous_status, new_status, reason, changed_fields) VALUES (?, ?, ?, ?, ?, ?)',
+      [qId, adminId, previousStatus, 'REMOVED', reason || 'Deleted by administrator', JSON.stringify(['status'])]
     );
 
     return {
@@ -1055,10 +1079,849 @@ async function deleteQuestionAdmin({ questionId, adminId, reason = 'Deleted by a
   });
 }
 
+/**
+ * List all questions with comprehensive filtering (search, language, level, status) for Admin
+ */
+async function getQuestionsAdmin({
+  search = '',
+  languageId = '',
+  levelId = '',
+  status = '',
+  page = 1,
+  limit = 20,
+  sort = 'newest'
+} = {}) {
+  const safePage = Math.max(1, parseInt(page, 10) || 1);
+  const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const offset = (safePage - 1) * safeLimit;
+
+  const conditions = [];
+  const params = [];
+
+  if (search && search.trim()) {
+    conditions.push('(q.title LIKE ? OR q.statement LIKE ? OR CAST(q.id AS CHAR) = ?)');
+    const term = `%${search.trim()}%`;
+    params.push(term, term, search.trim());
+  }
+
+  if (languageId && !isNaN(languageId)) {
+    conditions.push('q.language_id = ?');
+    params.push(parseInt(languageId, 10));
+  }
+
+  if (levelId && !isNaN(levelId)) {
+    conditions.push('q.level_id = ?');
+    params.push(parseInt(levelId, 10));
+  }
+
+  if (status && ['ACTIVE', 'PENDING_REVIEW', 'REMOVED'].includes(status.toUpperCase().trim())) {
+    conditions.push('q.status = ?');
+    params.push(status.toUpperCase().trim());
+  }
+
+  let orderClause = 'q.id DESC';
+  if (sort === 'oldest') orderClause = 'q.id ASC';
+  else if (sort === 'title') orderClause = 'q.title ASC';
+  else if (sort === 'reports') orderClause = 'report_count DESC, q.id DESC';
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const questions = await db.query(`
+    SELECT
+      q.id,
+      q.title,
+      q.statement,
+      q.input_format,
+      q.output_format,
+      q.constraints_text,
+      q.explanation,
+      q.language_id,
+      q.level_id,
+      q.contributor_id,
+      q.status,
+      q.created_at,
+      q.updated_at,
+      l.name AS language_name,
+      l.slug AS language_slug,
+      lvl.level_number,
+      lvl.title AS level_title,
+      u.username AS contributor_username,
+      (SELECT COUNT(*) FROM question_reports qr WHERE qr.question_id = q.id) AS report_count,
+      (SELECT COUNT(*) FROM question_votes qv WHERE qv.question_id = q.id) AS useful_votes_count,
+      (SELECT COUNT(*) FROM question_samples qs WHERE qs.question_id = q.id) AS sample_count,
+      (SELECT COUNT(*) FROM question_test_cases qtc WHERE qtc.question_id = q.id) AS test_case_count
+    FROM questions q
+    JOIN languages l ON q.language_id = l.id
+    JOIN levels lvl ON q.level_id = lvl.id
+    JOIN users u ON q.contributor_id = u.id
+    ${whereClause}
+    ORDER BY ${orderClause}
+    LIMIT ? OFFSET ?
+  `, [...params, safeLimit, offset]);
+
+  const countRows = await db.query(`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(CASE WHEN q.status = 'ACTIVE' THEN 1 END) AS total_active,
+      COUNT(CASE WHEN q.status = 'PENDING_REVIEW' THEN 1 END) AS total_pending,
+      COUNT(CASE WHEN q.status = 'REMOVED' THEN 1 END) AS total_removed
+    FROM questions q
+    ${whereClause}
+  `, params);
+
+  const c = countRows[0] || {};
+  const total = parseInt(c.total || 0, 10);
+
+  // Global counts for filter tabs
+  const globalCounts = await db.query(`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END) AS active,
+      COUNT(CASE WHEN status = 'PENDING_REVIEW' THEN 1 END) AS pending,
+      COUNT(CASE WHEN status = 'REMOVED' THEN 1 END) AS removed
+    FROM questions
+  `);
+  const gc = globalCounts[0] || {};
+
+  return {
+    questions,
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: Math.ceil(total / safeLimit)
+    },
+    counts: {
+      filteredTotal: total,
+      total: parseInt(gc.total || 0, 10),
+      active: parseInt(gc.active || 0, 10),
+      pending: parseInt(gc.pending || 0, 10),
+      removed: parseInt(gc.removed || 0, 10)
+    }
+  };
+}
+
+/**
+ * Edit an existing question (admin update)
+ * Allows modifying title, statement, input/output format, constraints, samples, test cases,
+ * starter code, language, and level.
+ * Strictly preserves identifiers, audit history, submissions, and reports.
+ * Explicit status handling: does not silently restore or approve.
+ */
+async function updateQuestionAdmin(questionId, updateData = {}, adminId) {
+  const qId = parseInt(questionId, 10);
+  if (isNaN(qId) || qId < 1) {
+    const err = new Error('Invalid question ID.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return await db.withTransaction(async (conn) => {
+    const [questions] = await conn.query(
+      'SELECT * FROM questions WHERE id = ? FOR UPDATE',
+      [qId]
+    );
+
+    if (!questions || questions.length === 0) {
+      const err = new Error('Question not found.');
+      err.statusCode = 404;
+      err.status = 404;
+      throw err;
+    }
+
+    const currentQuestion = questions[0];
+    const changedFields = [];
+
+    // Title validation
+    let title = currentQuestion.title;
+    if (updateData.title !== undefined) {
+      const cleanTitle = String(updateData.title).trim();
+      if (cleanTitle.length < 5 || cleanTitle.length > 200) {
+        const err = new Error('Question title must be between 5 and 200 characters.');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (cleanTitle !== currentQuestion.title) {
+        changedFields.push('title');
+        title = cleanTitle;
+      }
+    }
+
+    // Statement validation
+    let statement = currentQuestion.statement;
+    if (updateData.statement !== undefined) {
+      const cleanStatement = String(updateData.statement).trim();
+      if (cleanStatement.length < 20) {
+        const err = new Error('Problem statement must be at least 20 characters.');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (cleanStatement !== currentQuestion.statement) {
+        changedFields.push('statement');
+        statement = cleanStatement;
+      }
+    }
+
+    // Input format
+    let inputFormat = currentQuestion.input_format;
+    if (updateData.input_format !== undefined) {
+      const cleanInput = String(updateData.input_format).trim();
+      if (!cleanInput) {
+        const err = new Error('Input format description is required.');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (cleanInput !== currentQuestion.input_format) {
+        changedFields.push('input_format');
+        inputFormat = cleanInput;
+      }
+    }
+
+    // Output format
+    let outputFormat = currentQuestion.output_format;
+    if (updateData.output_format !== undefined) {
+      const cleanOutput = String(updateData.output_format).trim();
+      if (!cleanOutput) {
+        const err = new Error('Output format description is required.');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (cleanOutput !== currentQuestion.output_format) {
+        changedFields.push('output_format');
+        outputFormat = cleanOutput;
+      }
+    }
+
+    // Constraints
+    let constraintsText = currentQuestion.constraints_text;
+    if (updateData.constraints_text !== undefined) {
+      const cleanConstraints = String(updateData.constraints_text).trim();
+      if (!cleanConstraints) {
+        const err = new Error('Constraints description is required.');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (cleanConstraints !== currentQuestion.constraints_text) {
+        changedFields.push('constraints_text');
+        constraintsText = cleanConstraints;
+      }
+    }
+
+    // Explanation / reference solution
+    let explanation = currentQuestion.explanation;
+    if (updateData.explanation !== undefined) {
+      const cleanExp = updateData.explanation ? String(updateData.explanation).trim() : '';
+      if (cleanExp !== (currentQuestion.explanation || '')) {
+        changedFields.push('explanation');
+        explanation = cleanExp;
+      }
+    }
+
+    // Language ID validation
+    let languageId = currentQuestion.language_id;
+    if (updateData.language_id !== undefined) {
+      const parsedLangId = parseInt(updateData.language_id, 10);
+      if (isNaN(parsedLangId) || parsedLangId < 1) {
+        const err = new Error('Valid language ID is required.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const [langRows] = await conn.query(
+        'SELECT id, name, slug FROM languages WHERE id = ? AND enabled = TRUE',
+        [parsedLangId]
+      );
+      if (!langRows || langRows.length === 0) {
+        const err = new Error('Selected programming language does not exist or is disabled.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      if (parsedLangId !== currentQuestion.language_id) {
+        changedFields.push('language_id');
+        languageId = parsedLangId;
+      }
+    }
+
+    // Level ID validation (must belong to target language)
+    let levelId = currentQuestion.level_id;
+    if (updateData.level_id !== undefined || updateData.language_id !== undefined) {
+      const targetLevelId = updateData.level_id !== undefined ? parseInt(updateData.level_id, 10) : currentQuestion.level_id;
+      if (isNaN(targetLevelId) || targetLevelId < 1) {
+        const err = new Error('Valid level ID is required.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const [lvlRows] = await conn.query(
+        'SELECT id, level_number, title FROM levels WHERE id = ? AND language_id = ?',
+        [targetLevelId, languageId]
+      );
+      if (!lvlRows || lvlRows.length === 0) {
+        const err = new Error('Selected level does not belong to the selected programming language.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      if (targetLevelId !== currentQuestion.level_id) {
+        changedFields.push('level_id');
+        levelId = targetLevelId;
+      }
+    }
+
+    // Status: explicit update behavior
+    // Editing a removed question does NOT silently restore it.
+    // Editing a pending-review question does NOT silently approve it.
+    let finalStatus = currentQuestion.status;
+    if (updateData.status !== undefined && updateData.status !== null) {
+      const cleanStatus = String(updateData.status).toUpperCase().trim();
+      if (!['ACTIVE', 'PENDING_REVIEW', 'REMOVED'].includes(cleanStatus)) {
+        const err = new Error('Invalid status. Must be ACTIVE, PENDING_REVIEW, or REMOVED.');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (cleanStatus !== currentQuestion.status) {
+        changedFields.push('status');
+        finalStatus = cleanStatus;
+      }
+    }
+
+    // Update questions table
+    await conn.query(`
+      UPDATE questions
+      SET title = ?, statement = ?, input_format = ?, output_format = ?,
+          constraints_text = ?, explanation = ?, language_id = ?, level_id = ?,
+          status = ?
+      WHERE id = ?
+    `, [
+      title, statement, inputFormat, outputFormat,
+      constraintsText, explanation, languageId, levelId,
+      finalStatus, qId
+    ]);
+
+    // Update samples if provided
+    if (updateData.samples !== undefined) {
+      if (!Array.isArray(updateData.samples) || updateData.samples.length === 0) {
+        const err = new Error('At least one sample input/output pair is required.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      for (let i = 0; i < updateData.samples.length; i++) {
+        const s = updateData.samples[i];
+        if (s.sample_input === undefined || s.expected_output === undefined) {
+          const err = new Error(`Sample #${i + 1} must include sample_input and expected_output.`);
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+
+      await conn.query('DELETE FROM question_samples WHERE question_id = ?', [qId]);
+      for (let i = 0; i < updateData.samples.length; i++) {
+        const s = updateData.samples[i];
+        await conn.query(`
+          INSERT INTO question_samples (question_id, sample_input, expected_output, explanation, display_order)
+          VALUES (?, ?, ?, ?, ?)
+        `, [qId, String(s.sample_input || ''), String(s.expected_output || ''), String(s.explanation || ''), i + 1]);
+      }
+      changedFields.push('samples');
+    }
+
+    // Update test cases if provided
+    if (updateData.test_cases !== undefined) {
+      if (!Array.isArray(updateData.test_cases) || updateData.test_cases.length === 0) {
+        const err = new Error('At least one test case is required.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      for (let i = 0; i < updateData.test_cases.length; i++) {
+        const tc = updateData.test_cases[i];
+        if (tc.test_input === undefined || tc.expected_output === undefined) {
+          const err = new Error(`Test case #${i + 1} must include test_input and expected_output.`);
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+
+      await conn.query('DELETE FROM question_test_cases WHERE question_id = ?', [qId]);
+      for (let i = 0; i < updateData.test_cases.length; i++) {
+        const tc = updateData.test_cases[i];
+        await conn.query(`
+          INSERT INTO question_test_cases (question_id, test_input, expected_output, is_hidden, display_order)
+          VALUES (?, ?, ?, ?, ?)
+        `, [qId, String(tc.test_input || ''), String(tc.expected_output || ''), tc.is_hidden !== false, i + 1]);
+      }
+      changedFields.push('test_cases');
+    }
+
+    // Update starter code / reference solution templates if provided
+    if (updateData.starter_code !== undefined && typeof updateData.starter_code === 'object') {
+      await conn.query('DELETE FROM starter_code_templates WHERE question_id = ?', [qId]);
+      for (const [langSlug, code] of Object.entries(updateData.starter_code)) {
+        if (typeof code === 'string' && code.trim()) {
+          await conn.query(`
+            INSERT INTO starter_code_templates (question_id, language_slug, code)
+            VALUES (?, ?, ?)
+          `, [qId, langSlug, code]);
+        }
+      }
+      changedFields.push('starter_code');
+    }
+
+    // Record audit event
+    const reasonText = updateData.reason || `Question edited by administrator${changedFields.length > 0 ? ` (Changed: ${changedFields.join(', ')})` : ''}`;
+    await conn.query(`
+      INSERT INTO question_audit_logs (
+        question_id, admin_id, previous_status, new_status, reason, changed_fields
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `, [
+      qId,
+      adminId,
+      currentQuestion.status,
+      finalStatus,
+      reasonText,
+      JSON.stringify(changedFields)
+    ]);
+
+    return {
+      success: true,
+      message: `Question #${qId} ("${title}") updated successfully.`,
+      question: {
+        id: qId,
+        title,
+        statement,
+        inputFormat,
+        outputFormat,
+        constraintsText,
+        explanation,
+        languageId,
+        levelId,
+        status: finalStatus
+      },
+      changedFields
+    };
+  });
+}
+
+/**
+ * List all programs with enabled languages, associated level count, and question count
+ */
+async function getProgramsAdmin({
+  search = '',
+  status = '',
+  page = 1,
+  limit = 20
+} = {}) {
+  const safePage = Math.max(1, parseInt(page, 10) || 1);
+  const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const offset = (safePage - 1) * safeLimit;
+
+  const conditions = [];
+  const params = [];
+
+  if (search && search.trim()) {
+    conditions.push('(p.name LIKE ? OR p.description LIKE ?)');
+    const term = `%${search.trim()}%`;
+    params.push(term, term);
+  }
+
+  if (status && ['ACTIVE', 'INACTIVE'].includes(status.toUpperCase().trim())) {
+    conditions.push('p.status = ?');
+    params.push(status.toUpperCase().trim());
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const programs = await db.query(`
+    SELECT
+      p.id,
+      p.name,
+      p.slug,
+      p.description,
+      p.status,
+      p.created_at,
+      p.updated_at
+    FROM programs p
+    ${whereClause}
+    ORDER BY p.id DESC
+    LIMIT ? OFFSET ?
+  `, [...params, safeLimit, offset]);
+
+  // Enrich each program with its enabled languages and live counts
+  const enriched = [];
+  for (const prog of programs) {
+    const langs = await db.query(`
+      SELECT l.id, l.name, l.slug
+      FROM program_languages pl
+      JOIN languages l ON pl.language_id = l.id
+      WHERE pl.program_id = ?
+      ORDER BY l.name ASC
+    `, [prog.id]);
+
+    const langIds = langs.map(l => l.id);
+    let levelCount = 0;
+    let questionCount = 0;
+
+    if (langIds.length > 0) {
+      const lvlRes = await db.query(`
+        SELECT COUNT(*) AS total FROM levels WHERE language_id IN (?)
+      `, [langIds]);
+      levelCount = parseInt(lvlRes[0]?.total || 0, 10);
+
+      const qRes = await db.query(`
+        SELECT COUNT(*) AS total FROM questions WHERE language_id IN (?) AND status = 'ACTIVE'
+      `, [langIds]);
+      questionCount = parseInt(qRes[0]?.total || 0, 10);
+    }
+
+    enriched.push({
+      ...prog,
+      languages: langs,
+      languageCount: langs.length,
+      levelCount,
+      questionCount
+    });
+  }
+
+  const countRes = await db.query(`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END) AS active,
+      COUNT(CASE WHEN status = 'INACTIVE' THEN 1 END) AS inactive
+    FROM programs p
+    ${whereClause}
+  `, params);
+
+  const c = countRes[0] || {};
+  const total = parseInt(c.total || 0, 10);
+
+  return {
+    programs: enriched,
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: Math.ceil(total / safeLimit)
+    },
+    counts: {
+      total,
+      active: parseInt(c.active || 0, 10),
+      inactive: parseInt(c.inactive || 0, 10)
+    }
+  };
+}
+
+/**
+ * Get program details by ID, including languages, levels, and associated questions
+ */
+async function getProgramByIdAdmin(programId) {
+  const pId = parseInt(programId, 10);
+  if (isNaN(pId) || pId < 1) {
+    const err = new Error('Invalid program ID.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const programs = await db.query('SELECT * FROM programs WHERE id = ?', [pId]);
+  if (!programs || programs.length === 0) {
+    const err = new Error('Program not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const program = programs[0];
+
+  const languages = await db.query(`
+    SELECT l.id, l.name, l.slug, l.enabled
+    FROM program_languages pl
+    JOIN languages l ON pl.language_id = l.id
+    WHERE pl.program_id = ?
+    ORDER BY l.name ASC
+  `, [pId]);
+
+  const langIds = languages.map(l => l.id);
+  let levels = [];
+  let questions = [];
+
+  if (langIds.length > 0) {
+    levels = await db.query(`
+      SELECT lvl.id, lvl.language_id, lvl.level_number, lvl.title, lvl.enabled, l.name AS language_name
+      FROM levels lvl
+      JOIN languages l ON lvl.language_id = l.id
+      WHERE lvl.language_id IN (?)
+      ORDER BY l.name ASC, lvl.level_number ASC
+    `, [langIds]);
+
+    questions = await db.query(`
+      SELECT q.id, q.title, q.language_id, q.level_id, q.status, l.name AS language_name, lvl.level_number
+      FROM questions q
+      JOIN languages l ON q.language_id = l.id
+      JOIN levels lvl ON q.level_id = lvl.id
+      WHERE q.language_id IN (?)
+      ORDER BY q.id DESC
+      LIMIT 20
+    `, [langIds]);
+  }
+
+  return {
+    program,
+    languages,
+    levels,
+    recentQuestions: questions,
+    totalLevels: levels.length,
+    totalQuestions: questions.length
+  };
+}
+
+/**
+ * Create a new program with supported languages
+ */
+async function createProgramAdmin({ name, description = '', status = 'ACTIVE', language_ids = [] }, adminId) {
+  if (!name || typeof name !== 'string' || name.trim().length < 3 || name.trim().length > 100) {
+    const err = new Error('Program name must be between 3 and 100 characters.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const cleanName = name.trim();
+
+  // Validate duplicate name (case-insensitive)
+  const existing = await db.query(
+    'SELECT id FROM programs WHERE LOWER(TRIM(name)) = LOWER(?)',
+    [cleanName]
+  );
+
+  if (existing && existing.length > 0) {
+    const err = new Error(`A program with the name '${cleanName}' already exists.`);
+    err.statusCode = 409;
+    throw err;
+  }
+
+  // Validate status
+  const cleanStatus = status ? String(status).toUpperCase().trim() : 'ACTIVE';
+  if (!['ACTIVE', 'INACTIVE'].includes(cleanStatus)) {
+    const err = new Error('Status must be either ACTIVE or INACTIVE.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Validate language_ids
+  if (!Array.isArray(language_ids) || language_ids.length === 0) {
+    const err = new Error('At least one supported programming language must be selected for the program.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const parsedLangIds = [...new Set(language_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0))];
+  if (parsedLangIds.length === 0) {
+    const err = new Error('At least one supported programming language must be selected for the program.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Verify all languages exist and are enabled
+  const validLangs = await db.query(
+    'SELECT id, name, slug FROM languages WHERE id IN (?) AND enabled = TRUE',
+    [parsedLangIds]
+  );
+
+  if (validLangs.length !== parsedLangIds.length) {
+    const err = new Error('One or more selected programming languages are invalid or unsupported.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Generate unique slug
+  let baseSlug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'program';
+  let slug = baseSlug;
+  let counter = 1;
+  while (true) {
+    const slugConflict = await db.query('SELECT id FROM programs WHERE slug = ?', [slug]);
+    if (!slugConflict || slugConflict.length === 0) break;
+    slug = `${baseSlug}-${counter++}`;
+  }
+
+  return await db.withTransaction(async (conn) => {
+    const [ins] = await conn.query(
+      'INSERT INTO programs (name, slug, description, status) VALUES (?, ?, ?, ?)',
+      [cleanName, slug, description ? description.trim() : '', cleanStatus]
+    );
+
+    const programId = ins.insertId;
+
+    for (const langId of parsedLangIds) {
+      await conn.query(
+        'INSERT INTO program_languages (program_id, language_id) VALUES (?, ?)',
+        [programId, langId]
+      );
+    }
+
+    return {
+      success: true,
+      message: `Program '${cleanName}' created successfully.`,
+      program: {
+        id: programId,
+        name: cleanName,
+        slug,
+        description: description ? description.trim() : '',
+        status: cleanStatus,
+        languages: validLangs
+      }
+    };
+  });
+}
+
+/**
+ * Update an existing program (name, description, status, languages)
+ * Preserves all questions and levels without disruption.
+ */
+async function updateProgramAdmin(programId, { name, description, status, language_ids }, adminId) {
+  const pId = parseInt(programId, 10);
+  if (isNaN(pId) || pId < 1) {
+    const err = new Error('Invalid program ID.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existing = await db.query('SELECT * FROM programs WHERE id = ?', [pId]);
+  if (!existing || existing.length === 0) {
+    const err = new Error('Program not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const currentProgram = existing[0];
+  let newName = currentProgram.name;
+  let newDescription = currentProgram.description;
+  let newStatus = currentProgram.status;
+
+  if (name !== undefined) {
+    if (typeof name !== 'string' || name.trim().length < 3 || name.trim().length > 100) {
+      const err = new Error('Program name must be between 3 and 100 characters.');
+      err.statusCode = 400;
+      throw err;
+    }
+    const cleanName = name.trim();
+    if (cleanName.toLowerCase() !== currentProgram.name.toLowerCase()) {
+      const nameConflict = await db.query(
+        'SELECT id FROM programs WHERE LOWER(TRIM(name)) = LOWER(?) AND id != ?',
+        [cleanName, pId]
+      );
+      if (nameConflict && nameConflict.length > 0) {
+        const err = new Error(`A program with the name '${cleanName}' already exists.`);
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+    newName = cleanName;
+  }
+
+  if (description !== undefined) {
+    newDescription = typeof description === 'string' ? description.trim() : '';
+  }
+
+  if (status !== undefined) {
+    const cleanStatus = String(status).toUpperCase().trim();
+    if (!['ACTIVE', 'INACTIVE'].includes(cleanStatus)) {
+      const err = new Error('Status must be either ACTIVE or INACTIVE.');
+      err.statusCode = 400;
+      throw err;
+    }
+    newStatus = cleanStatus;
+  }
+
+  let parsedLangIds = null;
+  let validLangs = null;
+  if (language_ids !== undefined) {
+    if (!Array.isArray(language_ids) || language_ids.length === 0) {
+      const err = new Error('At least one supported programming language must be selected for the program.');
+      err.statusCode = 400;
+      throw err;
+    }
+    parsedLangIds = [...new Set(language_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0))];
+    if (parsedLangIds.length === 0) {
+      const err = new Error('At least one supported programming language must be selected for the program.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    validLangs = await db.query(
+      'SELECT id, name, slug FROM languages WHERE id IN (?) AND enabled = TRUE',
+      [parsedLangIds]
+    );
+
+    if (validLangs.length !== parsedLangIds.length) {
+      const err = new Error('One or more selected programming languages are invalid or unsupported.');
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
+  return await db.withTransaction(async (conn) => {
+    await conn.query(
+      'UPDATE programs SET name = ?, description = ?, status = ? WHERE id = ?',
+      [newName, newDescription, newStatus, pId]
+    );
+
+    if (parsedLangIds !== null) {
+      await conn.query('DELETE FROM program_languages WHERE program_id = ?', [pId]);
+      for (const langId of parsedLangIds) {
+        await conn.query(
+          'INSERT INTO program_languages (program_id, language_id) VALUES (?, ?)',
+          [pId, langId]
+        );
+      }
+    }
+
+    return {
+      success: true,
+      message: `Program '${newName}' updated successfully.`,
+      program: {
+        id: pId,
+        name: newName,
+        description: newDescription,
+        status: newStatus,
+        languages: validLangs
+      }
+    };
+  });
+}
+
+/**
+ * Delete a program
+ * Deletes the program and its program_languages links.
+ * All existing questions, levels, and user submissions remain completely intact.
+ */
+async function deleteProgramAdmin(programId, adminId) {
+  const pId = parseInt(programId, 10);
+  if (isNaN(pId) || pId < 1) {
+    const err = new Error('Invalid program ID.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existing = await db.query('SELECT id, name FROM programs WHERE id = ?', [pId]);
+  if (!existing || existing.length === 0) {
+    const err = new Error('Program not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  await db.query('DELETE FROM programs WHERE id = ?', [pId]);
+
+  return {
+    success: true,
+    message: `Program '${existing[0].name}' deleted successfully. Associated questions and levels remain intact.`
+  };
+}
+
 module.exports = {
   getAdminOverview,
   getReportedQuestions,
   getAdminQuestionDetails,
+  getQuestionsAdmin,
+  updateQuestionAdmin,
   removeQuestion,
   restoreQuestion,
   deleteQuestionAdmin,
@@ -1071,6 +1934,11 @@ module.exports = {
   getUsersAdmin,
   getUserByIdAdmin,
   updateUserAdmin,
-  deleteUserAdmin
+  deleteUserAdmin,
+  getProgramsAdmin,
+  getProgramByIdAdmin,
+  createProgramAdmin,
+  updateProgramAdmin,
+  deleteProgramAdmin
 };
 

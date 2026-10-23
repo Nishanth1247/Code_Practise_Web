@@ -13,6 +13,7 @@ const questionRoutes = require('./routes/questionRoutes');
 const submissionRoutes = require('./routes/submissionRoutes');
 const progressRoutes = require('./routes/progressRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const programRoutes = require('./routes/programRoutes');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -55,6 +56,7 @@ app.use('/api/levels', levelRoutes);
 app.use('/api/questions', questionRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/progress', progressRoutes);
+app.use('/api/programs', programRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Catch 404 for undefined API endpoints

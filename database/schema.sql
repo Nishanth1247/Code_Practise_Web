@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS `user_solved_questions` (
   INDEX `idx_user_solved_question` (`question_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 12. Question Audit Logs (Tracks status transitions: ACTIVE -> PENDING_REVIEW -> REMOVED -> ACTIVE)
+-- 12. Question Audit Logs (Tracks status transitions & edits)
 CREATE TABLE IF NOT EXISTS `question_audit_logs` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `question_id` INT NOT NULL,
@@ -177,9 +177,35 @@ CREATE TABLE IF NOT EXISTS `question_audit_logs` (
   `previous_status` ENUM('ACTIVE', 'PENDING_REVIEW', 'REMOVED') NOT NULL,
   `new_status` ENUM('ACTIVE', 'PENDING_REVIEW', 'REMOVED') NOT NULL,
   `reason` TEXT,
+  `changed_fields` TEXT,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`question_id`) REFERENCES `questions` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`admin_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   INDEX `idx_audit_logs_question` (`question_id`),
   INDEX `idx_audit_logs_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 13. Programs Table (Persistent coding practice tracks)
+CREATE TABLE IF NOT EXISTS `programs` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(100) NOT NULL UNIQUE,
+  `slug` VARCHAR(100) NOT NULL UNIQUE,
+  `description` TEXT,
+  `status` ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_programs_status` (`status`),
+  INDEX `idx_programs_slug` (`slug`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 14. Program Languages Junction Table (Many-to-many relationship)
+CREATE TABLE IF NOT EXISTS `program_languages` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `program_id` INT NOT NULL,
+  `language_id` INT NOT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`language_id`) REFERENCES `languages` (`id`) ON DELETE CASCADE,
+  UNIQUE KEY `unique_program_language` (`program_id`, `language_id`),
+  INDEX `idx_program_languages_lang` (`language_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

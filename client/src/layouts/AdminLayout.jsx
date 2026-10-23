@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
-import { ShieldCheck, LayoutDashboard, Layers, Flag, History, Users } from 'lucide-react';
+import { ShieldCheck, LayoutDashboard, Layers, Flag, History, Users, FileText, BookOpen } from 'lucide-react';
 
 export function AdminLayout() {
   const navLinkClass = ({ isActive }) =>
@@ -24,6 +24,14 @@ export function AdminLayout() {
             <NavLink to="/admin" end className={navLinkClass}>
               <LayoutDashboard className="w-4 h-4" />
               Overview
+            </NavLink>
+            <NavLink to="/admin/questions" className={navLinkClass}>
+              <FileText className="w-4 h-4" />
+              Questions
+            </NavLink>
+            <NavLink to="/admin/programs" className={navLinkClass}>
+              <BookOpen className="w-4 h-4" />
+              Manage Programs
             </NavLink>
             <NavLink to="/admin/users" className={navLinkClass}>
               <Users className="w-4 h-4" />

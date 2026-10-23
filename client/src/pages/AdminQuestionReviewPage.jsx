@@ -4,6 +4,8 @@ import api from '../services/api';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { StatusBadge } from '../components/common/Badge';
 import { ConfirmationModal } from '../components/common/ConfirmationModal';
+import { QuestionEditModal } from '../components/admin/QuestionEditModal';
+import { DeleteQuestionModal } from '../components/admin/DeleteQuestionModal';
 import {
   ArrowLeft,
   Trash2,
@@ -12,7 +14,8 @@ import {
   FileCode,
   ShieldCheck,
   History,
-  Eye
+  Eye,
+  Edit
 } from 'lucide-react';
 
 export function AdminQuestionReviewPage() {
@@ -27,6 +30,7 @@ export function AdminQuestionReviewPage() {
   // Modals
   const [isRemoveModalOpen, setIsRemoveModalOpen] = useState(false);
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   // Active section tab
   const [activeTab, setActiveTab] = useState('review'); // 'review', 'reports', 'testcases', 'audit'
@@ -53,11 +57,11 @@ export function AdminQuestionReviewPage() {
   const { question, samples, testCases, reports, auditLogs } = data;
 
   // Handle Delete Question (soft delete to REMOVED)
-  const handleDelete = async () => {
+  const handleDelete = async (reason) => {
     setActionLoading(true);
     try {
       await api.delete(`/admin/questions/${id}`, {
-        data: { reason: actionReason || 'Deleted by administrator review' }
+        data: { reason: reason || 'Deleted by administrator review' }
       });
       setIsRemoveModalOpen(false);
       setActionReason('');
@@ -119,23 +123,40 @@ export function AdminQuestionReviewPage() {
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center gap-3">
-            {question.status !== 'REMOVED' && (
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => setIsEditModalOpen(true)}
+              className="px-3.5 py-2 bg-[#F5F9FF] hover:bg-[#2563EB] text-[#1E3A8A] hover:text-white border border-[#DBEAFE] hover:border-transparent rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-2xs"
+            >
+              <Edit className="w-3.5 h-3.5" />
+              Edit Question
+            </button>
+
+            {question.status !== 'REMOVED' ? (
               <button
                 onClick={() => setIsRemoveModalOpen(true)}
-                className="px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                className="px-3.5 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-3.5 h-3.5" />
                 Delete Question
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsRemoveModalOpen(true)}
+                className="px-3.5 py-2 bg-slate-50 text-slate-500 border border-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5"
+                title="View soft-delete status"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Already Removed
               </button>
             )}
 
             {question.status !== 'ACTIVE' && (
               <button
                 onClick={() => setIsRestoreModalOpen(true)}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
               >
-                <RotateCcw className="w-4 h-4" />
+                <RotateCcw className="w-3.5 h-3.5" />
                 Restore to Active
               </button>
             )}
@@ -342,15 +363,20 @@ export function AdminQuestionReviewPage() {
       )}
 
       {/* Delete Confirmation Modal */}
-      <ConfirmationModal
+      <DeleteQuestionModal
         isOpen={isRemoveModalOpen}
         onClose={() => setIsRemoveModalOpen(false)}
+        question={question}
         onConfirm={handleDelete}
-        title="Delete Question from Platform"
-        message="This question will be set to REMOVED status and excluded globally from practice lists, submission evaluation, and catalog views. All reports, submissions, and contributor records remain fully preserved."
-        confirmText="Delete Question"
-        isDanger={true}
         isLoading={actionLoading}
+      />
+
+      {/* Edit Question Modal */}
+      <QuestionEditModal
+        isOpen={isEditModalOpen}
+        questionId={id}
+        onClose={() => setIsEditModalOpen(false)}
+        onSuccess={() => loadDetails()}
       />
 
       {/* Restore Confirmation Modal */}
