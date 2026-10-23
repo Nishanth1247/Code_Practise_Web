@@ -35,35 +35,40 @@ CREATE TABLE IF NOT EXISTS `languages` (
 -- 3. Levels Table
 CREATE TABLE IF NOT EXISTS `levels` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `language_id` INT NOT NULL,
+  `program_id` INT NULL,
+  `language_id` INT NULL,
   `level_number` INT NOT NULL,
   `title` VARCHAR(100) NOT NULL,
   `description` TEXT,
   `enabled` BOOLEAN NOT NULL DEFAULT TRUE,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`language_id`) REFERENCES `languages` (`id`) ON DELETE CASCADE,
-  UNIQUE KEY `unique_lang_level` (`language_id`, `level_number`),
+  INDEX `idx_levels_program_level` (`program_id`, `level_number`),
   INDEX `idx_levels_lang_level` (`language_id`, `level_number`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 4. Questions Table
 CREATE TABLE IF NOT EXISTS `questions` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `program_id` INT NULL,
   `title` VARCHAR(255) NOT NULL,
   `statement` MEDIUMTEXT NOT NULL,
   `input_format` TEXT NOT NULL,
   `output_format` TEXT NOT NULL,
   `constraints_text` TEXT NOT NULL,
   `explanation` TEXT,
-  `language_id` INT NOT NULL,
+  `language_id` INT NULL,
   `level_id` INT NOT NULL,
   `contributor_id` INT NOT NULL,
   `status` ENUM('ACTIVE', 'PENDING_REVIEW', 'REMOVED') NOT NULL DEFAULT 'ACTIVE',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`language_id`) REFERENCES `languages` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`level_id`) REFERENCES `levels` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`contributor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  INDEX `idx_questions_program_level` (`program_id`, `level_id`),
   INDEX `idx_questions_status_lang_level` (`status`, `language_id`, `level_id`),
   INDEX `idx_questions_contributor` (`contributor_id`),
   INDEX `idx_questions_created_at` (`created_at`)
@@ -185,12 +190,13 @@ CREATE TABLE IF NOT EXISTS `question_audit_logs` (
   INDEX `idx_audit_logs_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 13. Programs Table (Persistent coding practice tracks)
+-- 13. Programs Table (Independent persistent coding tracks)
 CREATE TABLE IF NOT EXISTS `programs` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `name` VARCHAR(100) NOT NULL UNIQUE,
   `slug` VARCHAR(100) NOT NULL UNIQUE,
   `description` TEXT,
+  `icon` VARCHAR(50) NOT NULL DEFAULT 'Code',
   `status` ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -198,11 +204,14 @@ CREATE TABLE IF NOT EXISTS `programs` (
   INDEX `idx_programs_slug` (`slug`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 14. Program Languages Junction Table (Many-to-many relationship)
+-- 14. Program Languages Junction Table (Allowed compilers & runtimes per program)
 CREATE TABLE IF NOT EXISTS `program_languages` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `program_id` INT NOT NULL,
   `language_id` INT NOT NULL,
+  `compiler_id` INT NOT NULL DEFAULT 0,
+  `compiler_name` VARCHAR(100) NULL,
+  `is_default` BOOLEAN NOT NULL DEFAULT FALSE,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`) ON DELETE CASCADE,
   FOREIGN KEY (`language_id`) REFERENCES `languages` (`id`) ON DELETE CASCADE,

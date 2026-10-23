@@ -19,12 +19,48 @@ import {
   Eye,
   ToggleLeft,
   ToggleRight,
-  ShieldAlert
+  ShieldAlert,
+  Terminal,
+  Cpu,
+  GitBranch,
+  Database,
+  Award,
+  Flame,
+  ArrowRight,
+  ChevronRight,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
+
+// Icon catalog for program visual identities
+const ICON_OPTIONS = [
+  { id: 'Code', label: 'Code', icon: FileCode },
+  { id: 'Cpu', label: 'CPU & Systems', icon: Cpu },
+  { id: 'Layers', label: 'Object / OOP', icon: Layers },
+  { id: 'Terminal', label: 'Terminal', icon: Terminal },
+  { id: 'GitBranch', label: 'Algorithms / DSA', icon: GitBranch },
+  { id: 'Database', label: 'Database', icon: Database },
+  { id: 'BookOpen', label: 'Curriculum', icon: BookOpen },
+  { id: 'Award', label: 'Mastery', icon: Award },
+  { id: 'Flame', label: 'Challenge', icon: Flame }
+];
+
+function ProgramIcon({ iconName, className = 'w-5 h-5' }) {
+  const match = ICON_OPTIONS.find(i => i.id === iconName);
+  const IconComp = match ? match.icon : FileCode;
+  return <IconComp className={className} />;
+}
+
+// Supported Judge0 Runtime Compilers
+const SYSTEM_COMPILERS = [
+  { languageId: 1, slug: 'c', label: 'C', compilerName: 'GCC 9.2.0', judge0Id: 50, desc: 'ISO C11 (GNU GCC)' },
+  { languageId: 2, slug: 'cpp', label: 'C++', compilerName: 'GCC 9.2.0', judge0Id: 54, desc: 'ISO C++17 (GNU G++)' },
+  { languageId: 3, slug: 'java', label: 'Java', compilerName: 'OpenJDK 13', judge0Id: 62, desc: 'OpenJDK 13.0.1' },
+  { languageId: 4, slug: 'python', label: 'Python', compilerName: 'Python 3.8.1', judge0Id: 71, desc: 'CPython 3.8.1' }
+];
 
 export function AdminProgramsPage() {
   const [programs, setPrograms] = useState([]);
-  const [languages, setLanguages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [counts, setCounts] = useState({ total: 0, active: 0, inactive: 0 });
 
@@ -42,31 +78,27 @@ export function AdminProgramsPage() {
   const [editingProgram, setEditingProgram] = useState(null);
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  const [formIcon, setFormIcon] = useState('Code');
   const [formStatus, setFormStatus] = useState('ACTIVE');
-  const [formLanguageIds, setFormLanguageIds] = useState([]);
+  const [formCompilers, setFormCompilers] = useState([1]); // default C
+  const [formLevelCount, setFormLevelCount] = useState(5);
+  const [formLevels, setFormLevels] = useState([]);
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
-  // Program Details Modal (Inspect Associated Levels & Questions)
-  const [inspectProgramId, setInspectProgramId] = useState(null);
-  const [inspectData, setInspectData] = useState(null);
-  const [inspectLoading, setInspectLoading] = useState(false);
+  // Level reduction confirmation modal
+  const [levelReductionWarning, setLevelReductionWarning] = useState(null);
+
+  // Program Level Manager Drawer
+  const [managingProgram, setManagingProgram] = useState(null);
+  const [managingLevels, setManagingLevels] = useState([]);
+  const [managingLoading, setManagingLoading] = useState(false);
 
   // Delete Program Modal
   const [deletingProgram, setDeletingProgram] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Load languages
-  const fetchLanguages = useCallback(async () => {
-    try {
-      const res = await api.get('/languages');
-      setLanguages(res.data.languages || []);
-    } catch (err) {
-      console.error('Failed to load supported languages:', err);
-    }
-  }, []);
-
-  // Load programs
+  // Fetch programs
   const fetchPrograms = useCallback(async () => {
     setLoading(true);
     try {
@@ -90,10 +122,6 @@ export function AdminProgramsPage() {
   }, [search, statusFilter, page]);
 
   useEffect(() => {
-    fetchLanguages();
-  }, [fetchLanguages]);
-
-  useEffect(() => {
     fetchPrograms();
   }, [fetchPrograms]);
 
@@ -105,33 +133,150 @@ export function AdminProgramsPage() {
     }
   }, [notification]);
 
+  // Generate levels helper
+  const generateLevelList = (count, existing = []) => {
+    const list = [];
+    const defaultTitles = [
+      'Fundamentals & Basic Syntax',
+      'Variables, Operators & Expressions',
+      'Control Flow & Branching',
+      'Loops & Iterative Logic',
+      'Arrays & Sequence Structures',
+      'Functions & Modular Design',
+      'Pointers, References & Memory',
+      'Object-Oriented Design & Classes',
+      'Data Structures & STL Basics',
+      'Recursion & Divide and Conquer',
+      'Sorting, Searching & Pointers',
+      'Stacks, Queues & Monotonic Sequences',
+      'Trees, Heaps & Priority Queues',
+      'Graphs & Advanced Search',
+      'Dynamic Programming & Optimization'
+    ];
+
+    for (let i = 1; i <= count; i++) {
+      const match = existing.find(l => (l.level_number || l.levelNumber) === i);
+      list.push({
+        id: match?.id || null,
+        level_number: i,
+        title: match?.title || defaultTitles[i - 1] || `Level ${i}: Advanced Challenges`,
+        description: match?.description || '',
+        enabled: match?.enabled !== false
+      });
+    }
+    return list;
+  };
+
   // Open Create Modal
-  const handleOpenCreate = () => {
+  const handleOpenCreateModal = () => {
     setEditingProgram(null);
     setFormName('');
     setFormDescription('');
+    setFormIcon('Code');
     setFormStatus('ACTIVE');
-    // Pre-select all available languages by default for convenience
-    setFormLanguageIds(languages.map(l => l.id));
+    setFormCompilers([1, 2, 3, 4]); // default select all 4 compilers
+    setFormLevelCount(5);
+    setFormLevels(generateLevelList(5));
     setFormError('');
     setIsModalOpen(true);
   };
 
   // Open Edit Modal
-  const handleOpenEdit = (prog) => {
+  const handleOpenEditModal = async (prog) => {
     setEditingProgram(prog);
-    setFormName(prog.name || '');
+    setFormName(prog.name);
     setFormDescription(prog.description || '');
-    setFormStatus(prog.status || 'ACTIVE');
-    setFormLanguageIds(prog.languages ? prog.languages.map(l => l.id) : []);
+    setFormIcon(prog.icon || 'Code');
+    setFormStatus(prog.status);
     setFormError('');
-    setIsModalOpen(true);
+
+    // Pre-select compilers
+    const compilerLangIds = (prog.compilers || []).map(c => c.language_id);
+    setFormCompilers(compilerLangIds.length > 0 ? compilerLangIds : [1]);
+
+    // Fetch existing levels for this program
+    try {
+      setFormLoading(true);
+      const res = await api.get(`/admin/programs/${prog.id}/levels`);
+      const lvls = res.data.levels || [];
+      const count = lvls.length > 0 ? lvls.length : 5;
+      setFormLevelCount(count);
+      setFormLevels(lvls.length > 0 ? lvls.map(l => ({
+        id: l.id,
+        level_number: l.levelNumber || l.level_number,
+        title: l.title,
+        description: l.description || '',
+        enabled: l.enabled !== false,
+        totalQuestions: l.totalQuestions || 0
+      })) : generateLevelList(5));
+      setIsModalOpen(true);
+    } catch (err) {
+      console.error('Failed to load program levels for edit:', err);
+      setFormLevelCount(5);
+      setFormLevels(generateLevelList(5));
+      setIsModalOpen(true);
+    } finally {
+      setFormLoading(false);
+    }
   };
 
-  // Toggle Language Checkbox
-  const handleLanguageToggle = (langId) => {
-    setFormLanguageIds(prev => {
+  // Handle Level Count Change in modal
+  const handleLevelCountChange = (newCount) => {
+    const safeCount = Math.min(20, Math.max(1, parseInt(newCount, 10) || 1));
+    setFormLevelCount(safeCount);
+    setFormLevels(prev => generateLevelList(safeCount, prev));
+  };
+
+  // Add individual level
+  const handleAddLevel = () => {
+    setFormLevels(prev => {
+      const nextNum = prev.length + 1;
+      return [
+        ...prev,
+        {
+          id: null,
+          level_number: nextNum,
+          title: `Level ${nextNum}: Topic Mastery`,
+          description: '',
+          enabled: true
+        }
+      ];
+    });
+    setFormLevelCount(prev => prev + 1);
+  };
+
+  // Remove individual level
+  const handleRemoveLevel = (index) => {
+    if (formLevels.length <= 1) return;
+    const target = formLevels[index];
+    if (target.totalQuestions > 0) {
+      setNotification({
+        type: 'error',
+        message: `Level ${target.level_number} contains ${target.totalQuestions} question(s). Populated levels cannot be deleted without confirmation.`
+      });
+      return;
+    }
+    const updated = formLevels.filter((_, i) => i !== index).map((lvl, idx) => ({
+      ...lvl,
+      level_number: idx + 1
+    }));
+    setFormLevels(updated);
+    setFormLevelCount(updated.length);
+  };
+
+  // Update level field in modal
+  const handleLevelFieldChange = (index, field, value) => {
+    setFormLevels(prev => prev.map((lvl, i) => i === index ? { ...lvl, [field]: value } : lvl));
+  };
+
+  // Toggle compiler selection
+  const handleToggleCompiler = (langId) => {
+    setFormCompilers(prev => {
       if (prev.includes(langId)) {
+        if (prev.length <= 1) {
+          setFormError('At least one supported compiler must remain selected.');
+          return prev;
+        }
         return prev.filter(id => id !== langId);
       } else {
         return [...prev, langId];
@@ -141,188 +286,201 @@ export function AdminProgramsPage() {
   };
 
   // Save Program (Create or Update)
-  const handleSaveProgram = async (e) => {
-    e.preventDefault();
-    setFormError('');
+  const handleSubmitProgram = async (e, confirmLevelReduction = false) => {
+    if (e) e.preventDefault();
 
     if (!formName.trim() || formName.trim().length < 3) {
-      setFormError('Program name must be at least 3 characters long.');
+      setFormError('Program name must be at least 3 characters.');
       return;
     }
 
-    if (formLanguageIds.length === 0) {
-      setFormError('Please select at least one supported programming language for this program.');
+    if (formCompilers.length === 0) {
+      setFormError('Please select at least one supported compiler/language.');
       return;
+    }
+
+    // Validate level titles
+    for (const lvl of formLevels) {
+      if (!lvl.title || lvl.title.trim().length < 2) {
+        setFormError(`Level ${lvl.level_number} must have a valid title (minimum 2 characters).`);
+        return;
+      }
     }
 
     setFormLoading(true);
+    setFormError('');
+
+    const compilersPayload = formCompilers.map(langId => {
+      const conf = SYSTEM_COMPILERS.find(sc => sc.languageId === langId);
+      return {
+        language_id: langId,
+        compiler_id: conf.judge0Id,
+        compiler_name: conf.compilerName
+      };
+    });
+
+    const payload = {
+      name: formName.trim(),
+      description: formDescription.trim(),
+      icon: formIcon,
+      status: formStatus,
+      compilers: compilersPayload,
+      levels: formLevels.map(lvl => ({
+        id: lvl.id || undefined,
+        level_number: lvl.level_number,
+        title: lvl.title.trim(),
+        description: (lvl.description || '').trim(),
+        enabled: lvl.enabled !== false
+      })),
+      confirm_level_reduction: confirmLevelReduction
+    };
+
     try {
       if (editingProgram) {
-        // Update existing program
-        const res = await api.patch(`/admin/programs/${editingProgram.id}`, {
-          name: formName.trim(),
-          description: formDescription.trim(),
-          status: formStatus,
-          language_ids: formLanguageIds
-        });
-        setNotification({
-          type: 'success',
-          message: res.data.message || `Program '${formName}' updated successfully.`
-        });
+        await api.patch(`/admin/programs/${editingProgram.id}`, payload);
+        setNotification({ type: 'success', message: `Program '${payload.name}' updated successfully!` });
       } else {
-        // Create new program
-        const res = await api.post('/admin/programs', {
-          name: formName.trim(),
-          description: formDescription.trim(),
-          status: formStatus,
-          language_ids: formLanguageIds
-        });
-        setNotification({
-          type: 'success',
-          message: res.data.message || `Program '${formName}' created successfully.`
-        });
+        await api.post('/admin/programs', payload);
+        setNotification({ type: 'success', message: `Program '${payload.name}' created with ${formLevels.length} independent level(s)!` });
       }
 
       setIsModalOpen(false);
-      await fetchPrograms();
+      setLevelReductionWarning(null);
+      fetchPrograms();
     } catch (err) {
-      console.error('Failed to save program:', err);
-      setFormError(err.response?.data?.error || 'Failed to save program.');
+      if (err.response?.data?.code === 'POPULATED_LEVEL_REDUCTION') {
+        setLevelReductionWarning(err.response.data);
+      } else {
+        setFormError(err.response?.data?.error || 'Failed to save program.');
+      }
     } finally {
       setFormLoading(false);
     }
   };
 
-  // Toggle Status (Activate / Deactivate)
-  const handleToggleStatus = async (prog) => {
-    const nextStatus = prog.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+  // Open Level Manager Drawer
+  const handleOpenLevelManager = async (prog) => {
+    setManagingProgram(prog);
+    setManagingLoading(true);
     try {
-      await api.patch(`/admin/programs/${prog.id}`, { status: nextStatus });
-      setNotification({
-        type: 'success',
-        message: `Program '${prog.name}' is now ${nextStatus.toLowerCase()}. Questions remain fully preserved.`
-      });
-      await fetchPrograms();
+      const res = await api.get(`/admin/programs/${prog.id}/levels`);
+      setManagingLevels(res.data.levels || []);
     } catch (err) {
-      console.error('Failed to toggle program status:', err);
-      setNotification({
-        type: 'error',
-        message: err.response?.data?.error || 'Failed to update program status.'
-      });
-    }
-  };
-
-  // Inspect Program Details
-  const handleInspectProgram = async (progId) => {
-    setInspectProgramId(progId);
-    setInspectLoading(true);
-    try {
-      const res = await api.get(`/admin/programs/${progId}`);
-      setInspectData(res.data);
-    } catch (err) {
-      console.error('Failed to load program inspection:', err);
-      setNotification({ type: 'error', message: 'Failed to load program breakdown.' });
-      setInspectProgramId(null);
+      console.error('Failed to load levels:', err);
+      setNotification({ type: 'error', message: 'Failed to load levels for program.' });
     } finally {
-      setInspectLoading(false);
+      setManagingLoading(false);
     }
   };
 
-  // Delete Program Confirm
+  // Toggle Level Enabled State inside Drawer
+  const handleToggleLevelEnabled = async (lvl) => {
+    try {
+      await api.patch(`/admin/programs/${managingProgram.id}/levels/${lvl.id}`, {
+        enabled: !lvl.enabled
+      });
+      setManagingLevels(prev => prev.map(l => l.id === lvl.id ? { ...l, enabled: !l.enabled } : l));
+      setNotification({ type: 'success', message: `Level ${lvl.levelNumber} status updated.` });
+      fetchPrograms();
+    } catch (err) {
+      setNotification({ type: 'error', message: err.response?.data?.error || 'Failed to update level.' });
+    }
+  };
+
+  // Delete Program Confirmation
   const handleDeleteProgram = async () => {
     if (!deletingProgram) return;
     setDeleteLoading(true);
     try {
-      const res = await api.delete(`/admin/programs/${deletingProgram.id}`);
+      await api.delete(`/admin/programs/${deletingProgram.id}`);
       setNotification({
         type: 'success',
-        message: res.data.message || `Program '${deletingProgram.name}' deleted successfully.`
+        message: `Program '${deletingProgram.name}' deleted. Questions and submissions remain preserved.`
       });
       setDeletingProgram(null);
-      await fetchPrograms();
+      fetchPrograms();
     } catch (err) {
-      console.error('Failed to delete program:', err);
-      setNotification({
-        type: 'error',
-        message: err.response?.data?.error || 'Failed to delete program.'
-      });
+      setNotification({ type: 'error', message: err.response?.data?.error || 'Failed to delete program.' });
     } finally {
       setDeleteLoading(false);
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#DBEAFE]">
-        <div>
-          <h1 className="text-3xl font-extrabold text-[#1E3A8A] tracking-tight">Manage Practice Programs</h1>
-          <p className="text-[#64748B] text-sm mt-1">
-            Create, configure, and manage persistent learning tracks (e.g. Fundamentals, Placements, DSA) across languages.
-          </p>
-        </div>
-
-        <button
-          onClick={handleOpenCreate}
-          className="px-4 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold rounded-xl transition-all shadow-sm flex items-center gap-2 shrink-0 self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" /> Create New Program
-        </button>
-      </div>
-
+    <div className="space-y-8">
       {/* Notifications */}
       {notification && (
-        <div className={`p-4 rounded-2xl border text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-150 ${
-          notification.type === 'success'
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : 'bg-rose-50 border-rose-200 text-rose-800'
-        }`}>
-          {notification.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+        <div
+          className={`p-4 rounded-2xl flex items-center gap-3 text-xs font-semibold shadow-sm transition-all animate-in fade-in ${
+            notification.type === 'error'
+              ? 'bg-rose-50 border border-rose-200 text-rose-800'
+              : 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+          }`}
+        >
+          {notification.type === 'error' ? (
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
           ) : (
-            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           )}
           <span>{notification.message}</span>
         </div>
       )}
 
-      {/* Status Tabs */}
-      <div className="flex items-center gap-2 border-b border-[#DBEAFE] overflow-x-auto pb-1">
+      {/* Header with Title and Create Action */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#2563EB] mb-1">
+            <BookOpen className="w-4 h-4" />
+            Curriculum Architecture
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1E3A8A]">
+            Independent Program Tracks
+          </h1>
+          <p className="text-[#64748B] text-xs sm:text-sm mt-1 max-w-2xl">
+            Create and manage self-contained practice tracks with customizable level progressions and multi-compiler Judge0 runtime restrictions.
+          </p>
+        </div>
+
         <button
-          onClick={() => { setStatusFilter(''); setPage(1); }}
-          className={`py-2 px-4 rounded-xl text-xs font-bold transition-all shrink-0 ${
-            statusFilter === ''
-              ? 'bg-[#2563EB] text-white shadow-sm'
-              : 'text-[#64748B] hover:text-[#172554] hover:bg-[#F5F9FF]'
-          }`}
+          onClick={handleOpenCreateModal}
+          className="px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-all shrink-0 hover:shadow-md"
         >
-          All Programs ({counts.total || 0})
-        </button>
-        <button
-          onClick={() => { setStatusFilter('ACTIVE'); setPage(1); }}
-          className={`py-2 px-4 rounded-xl text-xs font-bold transition-all shrink-0 ${
-            statusFilter === 'ACTIVE'
-              ? 'bg-emerald-600 text-white shadow-sm'
-              : 'text-[#64748B] hover:text-[#172554] hover:bg-[#F5F9FF]'
-          }`}
-        >
-          Active Tracks ({counts.active || 0})
-        </button>
-        <button
-          onClick={() => { setStatusFilter('INACTIVE'); setPage(1); }}
-          className={`py-2 px-4 rounded-xl text-xs font-bold transition-all shrink-0 ${
-            statusFilter === 'INACTIVE'
-              ? 'bg-slate-600 text-white shadow-sm'
-              : 'text-[#64748B] hover:text-[#172554] hover:bg-[#F5F9FF]'
-          }`}
-        >
-          Inactive ({counts.inactive || 0})
+          <Plus className="w-4 h-4" />
+          Create Program Track
         </button>
       </div>
 
-      {/* Search Bar */}
-      <div className="p-4 bg-white border border-[#DBEAFE] rounded-2xl shadow-sm">
-        <div className="relative">
+      {/* Overview Stat Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="p-5 rounded-2xl bg-white border border-[#DBEAFE] shadow-sm">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B] block mb-1">
+            Total Programs
+          </span>
+          <div className="text-2xl sm:text-3xl font-extrabold text-[#1E3A8A]">{counts.total || 0}</div>
+        </div>
+        <div className="p-5 rounded-2xl bg-white border border-[#DBEAFE] shadow-sm">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 block mb-1">
+            Active Tracks
+          </span>
+          <div className="text-2xl sm:text-3xl font-extrabold text-emerald-700">{counts.active || 0}</div>
+        </div>
+        <div className="p-5 rounded-2xl bg-white border border-[#DBEAFE] shadow-sm">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+            Inactive Tracks
+          </span>
+          <div className="text-2xl sm:text-3xl font-extrabold text-slate-700">{counts.inactive || 0}</div>
+        </div>
+        <div className="p-5 rounded-2xl bg-white border border-[#DBEAFE] shadow-sm">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB] block mb-1">
+            Judge0 Compilers
+          </span>
+          <div className="text-2xl sm:text-3xl font-extrabold text-[#2563EB]">4 Active</div>
+        </div>
+      </div>
+
+      {/* Filter and Search Bar */}
+      <div className="p-4 bg-white border border-[#DBEAFE] rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="relative w-full sm:w-80">
           <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -332,134 +490,125 @@ export function AdminProgramsPage() {
             className="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-[#CBD5E1] bg-[#F5F9FF] text-[#172554] placeholder-[#94A3B8] focus:outline-none focus:border-[#2563EB] focus:bg-white"
           />
         </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <select
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            className="w-full sm:w-auto px-3.5 py-2 text-xs rounded-xl border border-[#CBD5E1] bg-[#F5F9FF] text-[#172554] font-semibold focus:outline-none focus:border-[#2563EB] focus:bg-white"
+          >
+            <option value="">All Statuses</option>
+            <option value="ACTIVE">Active Tracks Only</option>
+            <option value="INACTIVE">Inactive Tracks</option>
+          </select>
+        </div>
       </div>
 
-      {/* Program Cards */}
+      {/* Program Grid */}
       {loading ? (
-        <LoadingSpinner message="Loading practice programs..." />
+        <LoadingSpinner message="Loading independent program tracks..." />
       ) : programs.length === 0 ? (
         <EmptyState
           title="No programs found"
-          description="Click 'Create New Program' above to set up a coding practice track."
+          description="Create your first independent practice track with customized levels and allowed compilers."
           icon={BookOpen}
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {programs.map((prog) => {
             const isActive = prog.status === 'ACTIVE';
             return (
               <div
                 key={prog.id}
-                className="p-5 bg-white border border-[#DBEAFE] hover:border-[#2563EB] rounded-2xl shadow-sm transition-all flex flex-col justify-between space-y-4"
+                className="p-6 bg-white border border-[#DBEAFE] hover:border-[#2563EB] rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
               >
                 <div>
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                      isActive
-                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        : 'bg-slate-100 text-slate-600 border border-slate-200'
-                    }`}>
+                  {/* Top Bar with Icon and Status */}
+                  <div className="flex items-start justify-between gap-3 mb-4">
+                    <div className="p-3 rounded-xl bg-[#F5F9FF] border border-[#DBEAFE] text-[#2563EB] group-hover:bg-[#2563EB] group-hover:text-white transition-colors">
+                      <ProgramIcon iconName={prog.icon} className="w-6 h-6" />
+                    </div>
+                    <span
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider border ${
+                        isActive
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                    >
                       {prog.status}
-                    </span>
-
-                    <span className="text-xs font-mono text-[#64748B]">
-                      slug: {prog.slug}
                     </span>
                   </div>
 
-                  <h3 className="text-lg font-bold text-[#1E3A8A]">
+                  {/* Title & Slug */}
+                  <h3 className="text-lg font-bold text-[#1E3A8A] mb-1 group-hover:text-[#2563EB] transition-colors">
                     {prog.name}
                   </h3>
+                  <span className="text-[11px] font-mono font-semibold text-[#64748B] block mb-3">
+                    /{prog.slug}
+                  </span>
 
-                  {prog.description && (
-                    <p className="text-xs text-[#64748B] mt-1 line-clamp-2">
-                      {prog.description}
-                    </p>
-                  )}
+                  <p className="text-xs text-[#64748B] line-clamp-2 mb-4 min-h-[32px]">
+                    {prog.description || 'Independent learning track with progressive practice levels.'}
+                  </p>
 
-                  {/* Supported Languages */}
-                  <div className="mt-3">
-                    <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block mb-1.5">
-                      Supported Languages ({prog.languageCount || 0}):
+                  {/* Compilers Badges */}
+                  <div className="mb-4">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] block mb-1.5">
+                      Allowed Compilers:
                     </span>
                     <div className="flex flex-wrap gap-1.5">
-                      {prog.languages && prog.languages.length > 0 ? (
-                        prog.languages.map((l) => (
-                          <span
-                            key={l.id}
-                            className="px-2.5 py-0.5 rounded-lg bg-[#F5F9FF] border border-[#DBEAFE] text-[#1E3A8A] text-xs font-semibold"
-                          >
-                            {l.name}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-rose-500 font-medium">None configured</span>
+                      {(prog.compilers || []).map((comp) => (
+                        <span
+                          key={comp.compiler_id || comp.language_slug}
+                          className="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-[#F5F9FF] text-[#1E3A8A] border border-[#DBEAFE]"
+                          title={`Judge0 ID ${comp.compiler_id}: ${comp.compiler_name}`}
+                        >
+                          {comp.language_name} ({comp.compiler_name})
+                        </span>
+                      ))}
+                      {(!prog.compilers || prog.compilers.length === 0) && (
+                        <span className="text-xs text-rose-500 font-semibold">No compilers configured</span>
                       )}
                     </div>
                   </div>
 
                   {/* Metrics */}
-                  <div className="flex items-center gap-4 mt-4 pt-3 border-t border-[#DBEAFE] text-xs text-[#64748B]">
-                    <span className="flex items-center gap-1 font-medium">
-                      <Layers className="w-3.5 h-3.5 text-[#2563EB]" />
-                      <strong>{prog.levelCount || 0}</strong> Levels
-                    </span>
-                    <span>&bull;</span>
-                    <span className="flex items-center gap-1 font-medium">
-                      <FileCode className="w-3.5 h-3.5 text-[#2563EB]" />
-                      <strong>{prog.questionCount || 0}</strong> Active Questions
-                    </span>
+                  <div className="grid grid-cols-2 gap-2 p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl mb-4">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-[#64748B] block">Levels</span>
+                      <span className="text-sm font-extrabold text-[#1E3A8A]">{prog.levelCount || 0} Levels</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-[#64748B] block">Questions</span>
+                      <span className="text-sm font-extrabold text-[#1E3A8A]">{prog.questionCount || 0} Problems</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Card Actions */}
-                <div className="flex items-center justify-between pt-3 border-t border-[#DBEAFE] gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => handleToggleStatus(prog)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors border ${
-                        isActive
-                          ? 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                          : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                      }`}
-                      title={isActive ? 'Deactivate track' : 'Activate track'}
-                    >
-                      {isActive ? (
-                        <>
-                          <ToggleRight className="w-3.5 h-3.5 text-emerald-600" />
-                          Deactivate
-                        </>
-                      ) : (
-                        <>
-                          <ToggleLeft className="w-3.5 h-3.5 text-slate-400" />
-                          Activate
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      onClick={() => handleInspectProgram(prog.id)}
-                      className="px-3 py-1.5 rounded-xl bg-[#F5F9FF] text-[#1E3A8A] hover:bg-[#DBEAFE] border border-[#DBEAFE] text-xs font-semibold flex items-center gap-1 transition-colors"
-                      title="Inspect levels and questions breakdown"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> Breakdown
-                    </button>
-                  </div>
+                {/* Actions */}
+                <div className="pt-3 border-t border-[#F1F5F9] flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => handleOpenLevelManager(prog)}
+                    className="px-3 py-1.5 rounded-lg bg-[#F5F9FF] hover:bg-[#DBEAFE] text-[#1E3A8A] text-xs font-bold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-[#2563EB]" />
+                    Manage Levels
+                  </button>
 
                   <div className="flex items-center gap-1.5">
                     <button
-                      onClick={() => handleOpenEdit(prog)}
-                      className="px-3 py-1.5 rounded-xl bg-white text-[#1E3A8A] hover:bg-[#F5F9FF] border border-[#CBD5E1] text-xs font-semibold flex items-center gap-1 transition-colors"
+                      onClick={() => handleOpenEditModal(prog)}
+                      className="p-1.5 rounded-lg text-[#64748B] hover:text-[#2563EB] hover:bg-[#F5F9FF] transition-colors"
+                      title="Edit Program Track"
                     >
-                      <Edit className="w-3.5 h-3.5" /> Edit
+                      <Edit className="w-4 h-4" />
                     </button>
-
                     <button
                       onClick={() => setDeletingProgram(prog)}
-                      className="p-1.5 rounded-xl text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors"
-                      title="Delete program"
+                      className="p-1.5 rounded-lg text-[#64748B] hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                      title="Delete Program Track"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
@@ -469,261 +618,424 @@ export function AdminProgramsPage() {
         </div>
       )}
 
-      {/* Program Create / Edit Modal */}
+      {/* ================= CREATE / EDIT PROGRAM MODAL ================= */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-xl bg-white border border-[#DBEAFE] rounded-3xl shadow-2xl p-6 md:p-8 my-8">
-            <div className="flex items-center justify-between pb-4 border-b border-[#DBEAFE] mb-4">
-              <div>
-                <h3 className="text-xl font-bold text-[#1E3A8A]">
-                  {editingProgram ? 'Edit Practice Program' : 'Create Practice Program'}
-                </h3>
-                <p className="text-xs text-[#64748B] mt-0.5">
-                  Configure program name, description, and supported languages.
-                </p>
+          <div className="relative w-full max-w-3xl bg-white border border-[#DBEAFE] rounded-3xl shadow-2xl p-6 md:p-8 my-8 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-[#DBEAFE] shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-[#F5F9FF] border border-[#DBEAFE] text-[#2563EB]">
+                  <ProgramIcon iconName={formIcon} className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-[#1E3A8A]">
+                    {editingProgram ? 'Edit Program Track' : 'Create Independent Program'}
+                  </h2>
+                  <p className="text-xs text-[#64748B] mt-0.5">
+                    Configure independent ordered levels and Judge0 compiler runtime permissions.
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-1.5 rounded-xl text-[#64748B] hover:text-[#172554] hover:bg-[#F5F9FF]"
+                className="p-1.5 rounded-xl text-[#64748B] hover:text-[#172554] hover:bg-[#F5F9FF] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
+            {/* Error Message */}
             {formError && (
-              <div className="mb-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <div className="mt-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>{formError}</span>
               </div>
             )}
 
-            <form onSubmit={handleSaveProgram} className="space-y-4">
-              {/* Name */}
-              <div>
-                <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1.5">
-                  Program Name *
-                </label>
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  placeholder="e.g. Fundamentals Practice, Placement Coding Track"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-semibold focus:outline-none focus:border-[#2563EB]"
-                  required
-                />
-              </div>
+            {/* Form Scrollable Body */}
+            <form onSubmit={handleSubmitProgram} className="flex-1 overflow-y-auto py-5 space-y-6 pr-1">
+              {/* SECTION 1: Identity */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold text-[#1E3A8A] uppercase tracking-wider border-b border-[#DBEAFE] pb-1.5">
+                  1. Program Track Identity
+                </h3>
 
-              {/* Description */}
-              <div>
-                <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1.5">
-                  Description
-                </label>
-                <textarea
-                  rows={3}
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Describe the focus, prerequisites, or target audience for this track..."
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs focus:outline-none focus:border-[#2563EB]"
-                />
-              </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1">
+                      Program Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={formName}
+                      onChange={(e) => setFormName(e.target.value)}
+                      placeholder="e.g. C Programming, DSA Practice, System Design"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-semibold focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                      required
+                    />
+                  </div>
 
-              {/* Supported Languages Checkboxes */}
-              <div className="p-4 rounded-2xl bg-[#F5F9FF] border border-[#DBEAFE] space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider">
-                    Select Supported Programming Languages *
+                  <div>
+                    <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1">
+                      Track Status *
+                    </label>
+                    <select
+                      value={formStatus}
+                      onChange={(e) => setFormStatus(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-semibold focus:outline-none focus:border-[#2563EB]"
+                    >
+                      <option value="ACTIVE">ACTIVE (Visible to learners)</option>
+                      <option value="INACTIVE">INACTIVE (Draft / Hidden)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1">
+                    Description
                   </label>
-                  <span className="text-[11px] text-[#64748B]">
-                    {formLanguageIds.length} selected
+                  <textarea
+                    rows={2}
+                    value={formDescription}
+                    onChange={(e) => setFormDescription(e.target.value)}
+                    placeholder="Brief overview of curriculum topics, learning objectives, and progression."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-medium focus:outline-none focus:border-[#2563EB]"
+                  />
+                </div>
+
+                {/* Icon Selection */}
+                <div>
+                  <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-2">
+                    Visual Identity Icon
+                  </label>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    {ICON_OPTIONS.map((item) => {
+                      const isSelected = formIcon === item.id;
+                      const IconComp = item.icon;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setFormIcon(item.id)}
+                          className={`p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all ${
+                            isSelected
+                              ? 'bg-[#2563EB] text-white border-[#2563EB] shadow-sm'
+                              : 'bg-[#F8FAFC] text-[#1E3A8A] border-[#E2E8F0] hover:bg-[#F5F9FF]'
+                          }`}
+                        >
+                          <IconComp className="w-4 h-4 shrink-0" />
+                          <span className="truncate">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 2: Allowed Compilers */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-[#DBEAFE] pb-1.5">
+                  <h3 className="text-xs font-bold text-[#1E3A8A] uppercase tracking-wider">
+                    2. Allowed Compilers & Runtimes (Judge0)
+                  </h3>
+                  <span className="text-[11px] font-semibold text-[#2563EB]">
+                    {formCompilers.length} Selected
                   </span>
                 </div>
-                <p className="text-[11px] text-[#64748B]">
-                  Select one or more languages for this track. You can choose a single language (e.g. C) or multiple languages (e.g. C, C++, Java, Python).
+
+                <p className="text-xs text-[#64748B]">
+                  Learners solving questions in this program will only be permitted to execute code with the selected compiler runtimes.
                 </p>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2">
-                  {languages.map((lang) => {
-                    const isChecked = formLanguageIds.includes(lang.id);
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {SYSTEM_COMPILERS.map((comp) => {
+                    const isChecked = formCompilers.includes(comp.languageId);
                     return (
-                      <label
-                        key={lang.id}
-                        className={`flex items-center gap-2.5 p-3 rounded-xl border cursor-pointer select-none transition-all ${
+                      <div
+                        key={comp.languageId}
+                        onClick={() => handleToggleCompiler(comp.languageId)}
+                        className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
                           isChecked
-                            ? 'bg-blue-50 border-[#2563EB] text-[#1E3A8A] font-bold shadow-2xs'
-                            : 'bg-white border-[#CBD5E1] text-[#64748B] hover:border-[#94A3B8]'
+                            ? 'bg-[#F5F9FF] border-[#2563EB] shadow-xs'
+                            : 'bg-white border-[#E2E8F0] hover:border-[#CBD5E1]'
                         }`}
                       >
                         <input
                           type="checkbox"
                           checked={isChecked}
-                          onChange={() => handleLanguageToggle(lang.id)}
-                          className="w-4 h-4 text-[#2563EB] rounded border-slate-300 focus:ring-blue-500"
+                          onChange={() => {}} // Handled by div click
+                          className="mt-0.5 rounded text-[#2563EB] focus:ring-[#2563EB] pointer-events-none"
                         />
-                        <span className="text-xs">{lang.name}</span>
-                      </label>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-[#1E3A8A]">{comp.label}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                              Judge0 #{comp.judge0Id}
+                            </span>
+                          </div>
+                          <span className="text-xs text-[#2563EB] font-mono font-medium block">
+                            {comp.compilerName}
+                          </span>
+                          <span className="text-[11px] text-[#64748B] block mt-0.5">
+                            {comp.desc}
+                          </span>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Status */}
-              <div>
-                <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1.5">
-                  Track Status
-                </label>
-                <select
-                  value={formStatus}
-                  onChange={(e) => setFormStatus(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-semibold focus:outline-none focus:border-[#2563EB]"
-                >
-                  <option value="ACTIVE">ACTIVE (Learners can enroll and practice)</option>
-                  <option value="INACTIVE">INACTIVE (Hidden from public practice)</option>
-                </select>
-              </div>
+              {/* SECTION 3: Independent Ordered Levels */}
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#DBEAFE] pb-1.5">
+                  <h3 className="text-xs font-bold text-[#1E3A8A] uppercase tracking-wider">
+                    3. Independent Level Progression ({formLevels.length} Levels)
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-[#64748B] font-medium">Quick Count:</span>
+                    {[3, 5, 7, 10].map(cnt => (
+                      <button
+                        key={cnt}
+                        type="button"
+                        onClick={() => handleLevelCountChange(cnt)}
+                        className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors ${
+                          formLevelCount === cnt
+                            ? 'bg-[#2563EB] text-white border-[#2563EB]'
+                            : 'bg-[#F8FAFC] text-[#64748B] border-[#CBD5E1] hover:bg-[#F5F9FF]'
+                        }`}
+                      >
+                        {cnt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-              {/* Modal Actions */}
-              <div className="flex justify-end gap-3 pt-4 border-t border-[#DBEAFE]">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  disabled={formLoading}
-                  className="px-4 py-2 text-xs font-semibold text-[#64748B] bg-[#F5F9FF] hover:bg-[#DBEAFE] border border-[#DBEAFE] rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={formLoading}
-                  className="px-5 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-all shadow-sm flex items-center gap-2 disabled:opacity-50"
-                >
-                  {formLoading && (
-                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                  )}
-                  <Save className="w-3.5 h-3.5" />
-                  {editingProgram ? 'Update Program' : 'Create Program'}
-                </button>
+                <div className="space-y-2.5">
+                  {formLevels.map((lvl, index) => (
+                    <div
+                      key={lvl.level_number}
+                      className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl flex items-center gap-3 transition-colors hover:border-[#CBD5E1]"
+                    >
+                      <span className="w-8 h-8 rounded-lg bg-[#2563EB] text-white font-mono text-xs font-bold flex items-center justify-center shrink-0">
+                        {lvl.level_number}
+                      </span>
+
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={lvl.title}
+                          onChange={(e) => handleLevelFieldChange(index, 'title', e.target.value)}
+                          placeholder={`Level ${lvl.level_number} Title`}
+                          className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#CBD5E1] bg-white text-[#172554] font-semibold focus:outline-none focus:border-[#2563EB]"
+                          required
+                        />
+                        <input
+                          type="text"
+                          value={lvl.description}
+                          onChange={(e) => handleLevelFieldChange(index, 'description', e.target.value)}
+                          placeholder="Optional level summary / topics"
+                          className="w-full px-3 py-1.5 text-xs rounded-lg border border-[#CBD5E1] bg-white text-[#64748B] focus:outline-none focus:border-[#2563EB]"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleLevelFieldChange(index, 'enabled', !lvl.enabled)}
+                          className={`p-1.5 rounded-lg text-xs font-bold transition-colors ${
+                            lvl.enabled ? 'text-emerald-700 hover:bg-emerald-50' : 'text-slate-400 hover:bg-slate-100'
+                          }`}
+                          title={lvl.enabled ? 'Enabled' : 'Disabled'}
+                        >
+                          {lvl.enabled ? <ToggleRight className="w-5 h-5 text-emerald-600" /> : <ToggleLeft className="w-5 h-5" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLevel(index)}
+                          disabled={formLevels.length <= 1}
+                          className="p-1.5 text-[#64748B] hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors disabled:opacity-30"
+                          title="Remove Level"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={handleAddLevel}
+                    className="w-full py-2 border-2 border-dashed border-[#DBEAFE] hover:border-[#2563EB] rounded-xl text-xs font-bold text-[#2563EB] hover:bg-[#F5F9FF] transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Another Level
+                  </button>
+                </div>
               </div>
             </form>
+
+            {/* Modal Footer */}
+            <div className="pt-4 border-t border-[#DBEAFE] flex items-center justify-between gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl border border-[#CBD5E1] text-[#64748B] hover:text-[#172554] text-xs font-bold hover:bg-[#F5F9FF] transition-colors"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => handleSubmitProgram(e, false)}
+                disabled={formLoading}
+                className="px-6 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                {formLoading ? 'Saving...' : editingProgram ? 'Save Program Changes' : 'Create Program Track'}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Program Breakdown Inspection Modal */}
-      {inspectProgramId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-3xl bg-white border border-[#DBEAFE] rounded-3xl shadow-2xl p-6 md:p-8 my-8 max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between pb-4 border-b border-[#DBEAFE] shrink-0">
+      {/* ================= LEVEL REDUCTION WARNING MODAL ================= */}
+      {levelReductionWarning && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
+          <div className="relative w-full max-w-lg bg-white border border-rose-200 rounded-3xl shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
               <div>
-                <h3 className="text-xl font-bold text-[#1E3A8A]">
-                  Program Breakdown: {inspectData?.program?.name}
-                </h3>
-                <p className="text-xs text-[#64748B] mt-0.5">
-                  Associated languages, levels, and practice questions.
-                </p>
+                <h3 className="text-base font-bold text-rose-950">Populated Level Truncation Warning</h3>
+                <span className="text-xs text-rose-700">Explicit confirmation required</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-[#64748B] leading-relaxed">
+              Reducing the level count will remove levels that currently contain registered questions:
+            </p>
+
+            <div className="space-y-1.5 p-3 rounded-xl bg-rose-50/50 border border-rose-100 max-h-48 overflow-y-auto">
+              {(levelReductionWarning.populatedLevels || []).map(l => (
+                <div key={l.id} className="text-xs font-semibold text-rose-900 flex items-center justify-between">
+                  <span>Level {l.level_number}: {l.title}</span>
+                  <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 font-bold">
+                    {l.question_count} Question(s)
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-[11px] text-[#64748B]">
+              Questions in deleted levels will be safely preserved in the database and unlinked from the program so no user submissions or test cases are lost.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setLevelReductionWarning(null)}
+                className="px-4 py-2 rounded-xl border border-[#CBD5E1] text-[#64748B] text-xs font-bold hover:bg-[#F5F9FF]"
+              >
+                Abort & Keep Levels
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSubmitProgram(null, true)}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm"
+              >
+                Confirm Truncation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= LEVEL MANAGEMENT DRAWER ================= */}
+      {managingProgram && (
+        <div className="fixed inset-0 z-50 flex items-center justify-end bg-slate-900/50 backdrop-blur-xs">
+          <div className="relative w-full max-w-xl h-full bg-white shadow-2xl p-6 flex flex-col animate-in slide-in-from-right">
+            <div className="flex items-center justify-between pb-4 border-b border-[#DBEAFE]">
+              <div>
+                <span className="text-xs font-mono font-bold text-[#2563EB] bg-[#F5F9FF] px-2 py-0.5 rounded-md">
+                  Track: {managingProgram.name}
+                </span>
+                <h2 className="text-xl font-bold text-[#1E3A8A] mt-1">Level Management</h2>
               </div>
               <button
-                onClick={() => setInspectProgramId(null)}
+                onClick={() => setManagingProgram(null)}
                 className="p-1.5 rounded-xl text-[#64748B] hover:text-[#172554] hover:bg-[#F5F9FF]"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto py-4 space-y-4">
-              {inspectLoading ? (
-                <LoadingSpinner message="Loading program breakdown..." />
-              ) : inspectData ? (
-                <>
-                  {/* Languages Summary */}
-                  <div>
-                    <h4 className="text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-2">
-                      Enabled Languages ({inspectData.languages?.length || 0})
-                    </h4>
-                    <div className="flex flex-wrap gap-2">
-                      {inspectData.languages?.map(l => (
-                        <span
-                          key={l.id}
-                          className="px-3 py-1 rounded-xl bg-[#F5F9FF] border border-[#DBEAFE] text-xs font-bold text-[#1E3A8A]"
-                        >
-                          {l.name} ({l.slug})
+            <div className="flex-1 overflow-y-auto py-5 space-y-3">
+              {managingLoading ? (
+                <LoadingSpinner message="Loading levels..." />
+              ) : managingLevels.length === 0 ? (
+                <EmptyState title="No levels configured" description="Add levels to this program." icon={Layers} />
+              ) : (
+                managingLevels.map(lvl => (
+                  <div
+                    key={lvl.id}
+                    className="p-4 bg-white border border-[#DBEAFE] rounded-2xl shadow-xs flex items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="w-8 h-8 rounded-xl bg-[#2563EB] text-white text-xs font-bold font-mono flex items-center justify-center shrink-0">
+                        {lvl.levelNumber || lvl.level_number}
+                      </span>
+                      <div>
+                        <h4 className="text-xs font-bold text-[#1E3A8A]">{lvl.title}</h4>
+                        <span className="text-[11px] text-[#64748B] block">
+                          {lvl.totalQuestions} Questions ({lvl.activeQuestions || 0} Active)
                         </span>
-                      ))}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Levels Summary */}
-                  <div>
-                    <h4 className="text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-2">
-                      Associated Levels ({inspectData.totalLevels || 0})
-                    </h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                      {inspectData.levels?.map(lvl => (
-                        <div
-                          key={lvl.id}
-                          className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-center justify-between"
-                        >
-                          <span className="font-semibold text-[#172554]">
-                            {lvl.language_name} &bull; Level {lvl.level_number}: {lvl.title}
-                          </span>
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${lvl.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
-                            {lvl.enabled ? 'Enabled' : 'Disabled'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                    <button
+                      onClick={() => handleToggleLevelEnabled(lvl)}
+                      className="p-1.5 rounded-xl hover:bg-[#F5F9FF] transition-colors"
+                      title={lvl.enabled ? 'Click to disable' : 'Click to enable'}
+                    >
+                      {lvl.enabled ? (
+                        <ToggleRight className="w-6 h-6 text-emerald-600" />
+                      ) : (
+                        <ToggleLeft className="w-6 h-6 text-slate-400" />
+                      )}
+                    </button>
                   </div>
-
-                  {/* Questions Preview */}
-                  <div>
-                    <h4 className="text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-2">
-                      Associated Practice Questions ({inspectData.totalQuestions || 0})
-                    </h4>
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                      {inspectData.recentQuestions?.map(q => (
-                        <div
-                          key={q.id}
-                          className="p-2.5 rounded-xl bg-white border border-[#DBEAFE] text-xs flex items-center justify-between"
-                        >
-                          <span className="font-semibold text-[#172554] truncate max-w-md">
-                            #{q.id} &bull; {q.title}
-                          </span>
-                          <span className="text-[11px] text-[#64748B] shrink-0 font-mono">
-                            {q.language_name} &bull; L{q.level_number}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              ) : null}
+                ))
+              )}
             </div>
 
-            <div className="flex justify-end pt-4 border-t border-[#DBEAFE] shrink-0">
+            <div className="pt-4 border-t border-[#DBEAFE] flex justify-end">
               <button
-                type="button"
-                onClick={() => setInspectProgramId(null)}
-                className="px-4 py-2 text-xs font-semibold text-[#64748B] bg-[#F5F9FF] hover:bg-[#DBEAFE] border border-[#DBEAFE] rounded-xl transition-colors"
+                onClick={() => setManagingProgram(null)}
+                className="px-5 py-2 rounded-xl bg-[#2563EB] text-white text-xs font-bold"
               >
-                Close
+                Done
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-      <ConfirmationModal
-        isOpen={Boolean(deletingProgram)}
-        onClose={() => setDeletingProgram(null)}
-        onConfirm={handleDeleteProgram}
-        title={`Delete Program '${deletingProgram?.name}'`}
-        message="Are you sure you want to delete this program track? All associated questions, levels, and user submissions will remain completely intact in the database."
-        confirmText="Delete Program"
-        isDanger={true}
-        isLoading={deleteLoading}
-      />
+      {/* ================= DELETE CONFIRMATION MODAL ================= */}
+      {deletingProgram && (
+        <ConfirmationModal
+          isOpen={Boolean(deletingProgram)}
+          title="Delete Program Track?"
+          message={`Are you sure you want to delete '${deletingProgram.name}'? All existing questions, levels, and user submissions remain preserved in the system.`}
+          confirmLabel="Delete Program"
+          confirmVariant="danger"
+          isLoading={deleteLoading}
+          onConfirm={handleDeleteProgram}
+          onCancel={() => setDeletingProgram(null)}
+        />
+      )}
     </div>
   );
 }
-
-export default AdminProgramsPage;

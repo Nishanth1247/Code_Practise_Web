@@ -31,6 +31,7 @@ export function AdminQuestionsPage() {
 
   // Filters
   const [search, setSearch] = useState('');
+  const [programId, setProgramId] = useState('');
   const [languageId, setLanguageId] = useState('');
   const [levelId, setLevelId] = useState('');
   const [status, setStatus] = useState('');
@@ -38,6 +39,7 @@ export function AdminQuestionsPage() {
   const [page, setPage] = useState(1);
 
   // Available options
+  const [programs, setPrograms] = useState([]);
   const [languages, setLanguages] = useState([]);
   const [levels, setLevels] = useState([]);
 
@@ -49,36 +51,51 @@ export function AdminQuestionsPage() {
   // Notifications
   const [notification, setNotification] = useState(null);
 
-  // Fetch languages on mount
+  // Fetch programs and languages on mount
   useEffect(() => {
-    async function fetchLanguages() {
+    async function fetchMetadata() {
       try {
-        const res = await api.get('/languages');
-        setLanguages(res.data.languages || []);
+        const [progRes, langRes] = await Promise.all([
+          api.get('/admin/programs'),
+          api.get('/languages')
+        ]);
+        setPrograms(progRes.data.programs || []);
+        setLanguages(langRes.data.languages || []);
       } catch (err) {
-        console.error('Failed to load languages for filters:', err);
+        console.error('Failed to load filter metadata:', err);
       }
     }
-    fetchLanguages();
+    fetchMetadata();
   }, []);
 
-  // Fetch levels when languageId changes
+  // Fetch levels when programId or languageId changes
   useEffect(() => {
-    if (!languageId) {
+    async function fetchLevels() {
+      if (programId) {
+        try {
+          const res = await api.get(`/admin/programs/${programId}/levels`);
+          setLevels(res.data.levels || []);
+          return;
+        } catch (err) {
+          console.error('Failed to load program levels:', err);
+        }
+      }
+
+      if (languageId) {
+        try {
+          const res = await api.get(`/languages/${languageId}/levels`);
+          setLevels(res.data.levels || []);
+          return;
+        } catch (err) {
+          console.error('Failed to load language levels:', err);
+        }
+      }
+
       setLevels([]);
       setLevelId('');
-      return;
-    }
-    async function fetchLevels() {
-      try {
-        const res = await api.get(`/languages/${languageId}/levels`);
-        setLevels(res.data.levels || []);
-      } catch (err) {
-        console.error('Failed to load levels for filters:', err);
-      }
     }
     fetchLevels();
-  }, [languageId]);
+  }, [programId, languageId]);
 
   // Fetch questions
   const fetchQuestions = useCallback(async () => {
@@ -87,6 +104,7 @@ export function AdminQuestionsPage() {
       const res = await api.get('/admin/questions', {
         params: {
           search: search.trim() || undefined,
+          programId: programId || undefined,
           languageId: languageId || undefined,
           levelId: levelId || undefined,
           status: status || undefined,
@@ -99,12 +117,12 @@ export function AdminQuestionsPage() {
       setPagination(res.data.pagination || { page: 1, limit: 15, total: 0, totalPages: 1 });
       setCounts(res.data.counts || { total: 0, active: 0, pending: 0, removed: 0 });
     } catch (err) {
-      console.error('Failed to load admin questions:', err);
+      console.error('Failed to load questions:', err);
       setNotification({ type: 'error', message: 'Failed to load questions.' });
     } finally {
       setLoading(false);
     }
-  }, [search, languageId, levelId, status, sort, page]);
+  }, [search, programId, languageId, levelId, status, sort, page]);
 
   useEffect(() => {
     fetchQuestions();
@@ -232,7 +250,7 @@ export function AdminQuestionsPage() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="p-4 bg-white border border-[#DBEAFE] rounded-2xl shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="p-4 bg-white border border-[#DBEAFE] rounded-2xl shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {/* Search */}
         <div className="relative">
           <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
@@ -243,6 +261,20 @@ export function AdminQuestionsPage() {
             placeholder="Search by title, statement, or ID..."
             className="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-[#CBD5E1] bg-[#F5F9FF] text-[#172554] placeholder-[#94A3B8] focus:outline-none focus:border-[#2563EB] focus:bg-white"
           />
+        </div>
+
+        {/* Program Filter */}
+        <div>
+          <select
+            value={programId}
+            onChange={(e) => { setProgramId(e.target.value); setLevelId(''); setPage(1); }}
+            className="w-full px-3 py-2 text-xs rounded-xl border border-[#CBD5E1] bg-[#F5F9FF] text-[#172554] font-semibold focus:outline-none focus:border-[#2563EB] focus:bg-white"
+          >
+            <option value="">All Program Tracks</option>
+            {programs.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
         </div>
 
         {/* Language Filter */}
@@ -264,10 +296,10 @@ export function AdminQuestionsPage() {
           <select
             value={levelId}
             onChange={(e) => { setLevelId(e.target.value); setPage(1); }}
-            disabled={!languageId}
+            disabled={!programId && !languageId}
             className="w-full px-3 py-2 text-xs rounded-xl border border-[#CBD5E1] bg-[#F5F9FF] text-[#172554] font-semibold focus:outline-none focus:border-[#2563EB] focus:bg-white disabled:opacity-50"
           >
-            <option value="">{languageId ? 'All Levels' : 'Select a Language First'}</option>
+            <option value="">{programId || languageId ? 'All Levels' : 'Select Program / Language First'}</option>
             {levels.map(lvl => (
               <option key={lvl.id} value={lvl.id}>
                 Level {lvl.level_number || lvl.levelNumber}: {lvl.title}
@@ -297,7 +329,7 @@ export function AdminQuestionsPage() {
       ) : questions.length === 0 ? (
         <EmptyState
           title="No questions found"
-          description="Try adjusting your search criteria, language, or status filters."
+          description="Try adjusting your search criteria, program track, language, or status filters."
           icon={FileText}
         />
       ) : (
@@ -316,8 +348,13 @@ export function AdminQuestionsPage() {
                       #{q.id}
                     </span>
                     <StatusBadge status={q.status} />
+                    {q.program_name && (
+                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
+                        {q.program_name}
+                      </span>
+                    )}
                     <span className="text-xs font-semibold px-2.5 py-0.5 rounded-md bg-[#F5F9FF] text-[#1E3A8A] border border-[#DBEAFE]">
-                      {q.language_name} &bull; Level {q.level_number}
+                      {q.language_name || 'Multi-compiler'} &bull; Level {q.level_number}: {q.level_title}
                     </span>
                     {parseInt(q.report_count, 10) > 0 && (
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">

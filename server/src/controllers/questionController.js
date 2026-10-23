@@ -59,7 +59,7 @@ async function getQuestionsForLevel(req, res, next) {
         CASE WHEN usq.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_solved,
         CASE WHEN my_vote.id IS NOT NULL THEN TRUE ELSE FALSE END AS user_has_voted
       FROM questions q
-      JOIN languages l ON q.language_id = l.id
+      LEFT JOIN languages l ON q.language_id = l.id
       JOIN levels lvl ON q.level_id = lvl.id
       JOIN users u ON q.contributor_id = u.id
       LEFT JOIN question_votes qv ON q.id = qv.question_id
@@ -124,6 +124,9 @@ async function getQuestionById(req, res, next) {
     const questions = await db.query(`
       SELECT
         q.*,
+        p.name AS program_name,
+        p.slug AS program_slug,
+        p.icon AS program_icon,
         l.name AS language_name,
         l.slug AS language_slug,
         lvl.level_number,
@@ -131,9 +134,10 @@ async function getQuestionById(req, res, next) {
         u.username AS contributor_username,
         (SELECT COUNT(*) FROM question_votes WHERE question_id = q.id) AS useful_votes_count
       FROM questions q
-      JOIN languages l ON q.language_id = l.id
-      JOIN levels lvl ON q.level_id = lvl.id
-      JOIN users u ON q.contributor_id = u.id
+      LEFT JOIN programs p ON q.program_id = p.id
+      LEFT JOIN languages l ON q.language_id = l.id
+      LEFT JOIN levels lvl ON q.level_id = lvl.id
+      LEFT JOIN users u ON q.contributor_id = u.id
       WHERE q.id = ?
     `, [id]);
 
@@ -156,6 +160,61 @@ async function getQuestionById(req, res, next) {
           error: 'This question is currently unavailable for practice.'
         });
       }
+    }
+
+    // Fetch allowed compilers for this question / program
+    let allowedCompilers = [];
+    if (question.program_id) {
+      const compilerRows = await db.query(`
+        SELECT
+          pl.compiler_id,
+          pl.compiler_name,
+          l.id AS language_id,
+          l.name AS language_name,
+          l.slug AS language_slug
+        FROM program_languages pl
+        JOIN languages l ON pl.language_id = l.id
+        WHERE pl.program_id = ? AND l.enabled = TRUE
+        ORDER BY l.name ASC
+      `, [question.program_id]);
+
+      allowedCompilers = compilerRows.map(c => ({
+        compilerId: c.compiler_id || (LANGUAGE_CONFIG[c.language_slug]?.judge0Id),
+        compilerName: c.compiler_name || (LANGUAGE_CONFIG[c.language_slug]?.displayName),
+        languageId: c.language_id,
+        languageName: c.language_name,
+        languageSlug: c.language_slug
+      }));
+    } else if (question.language_slug) {
+      const conf = LANGUAGE_CONFIG[question.language_slug];
+      if (conf) {
+        allowedCompilers = [{
+          compilerId: conf.judge0Id,
+          compilerName: conf.displayName,
+          languageId: question.language_id,
+          languageName: question.language_name,
+          languageSlug: question.language_slug
+        }];
+      }
+    }
+
+    // If question has specific language restriction, narrow down compilers
+    if (question.language_id && allowedCompilers.length > 0) {
+      const matching = allowedCompilers.filter(c => c.languageId === question.language_id);
+      if (matching.length > 0) {
+        allowedCompilers = matching;
+      }
+    }
+
+    // Default fallback if no compilers resolved
+    if (allowedCompilers.length === 0) {
+      allowedCompilers = Object.entries(LANGUAGE_CONFIG).map(([slug, conf]) => ({
+        compilerId: conf.judge0Id,
+        compilerName: conf.displayName,
+        languageId: null,
+        languageName: slug.toUpperCase(),
+        languageSlug: slug
+      }));
     }
 
     // Fetch visible sample cases only
@@ -202,6 +261,11 @@ async function getQuestionById(req, res, next) {
         outputFormat: question.output_format,
         constraintsText: question.constraints_text,
         explanation: question.explanation,
+        programId: question.program_id,
+        programName: question.program_name,
+        programSlug: question.program_slug,
+        programIcon: question.program_icon,
+        allowedCompilers,
         languageId: question.language_id,
         languageName: question.language_name,
         languageSlug: question.language_slug,
@@ -270,12 +334,30 @@ async function createQuestion(req, res, next) {
       }
     }
 
-    // Verify level exists for that language
+    // Verify level exists
     const levelRows = await db.query(
-      'SELECT id FROM levels WHERE id = ? AND language_id = ?',
-      [level_id, language_id]
+      'SELECT id, program_id, language_id FROM levels WHERE id = ?',
+      [level_id]
     );
     if (!levelRows || levelRows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Selected level does not exist.'
+      });
+    }
+
+    const targetLevel = levelRows[0];
+    let resolvedProgramId = req.body.program_id ? parseInt(req.body.program_id, 10) : targetLevel.program_id || null;
+
+    // Prevent cross-program level assignment!
+    if (resolvedProgramId && targetLevel.program_id && targetLevel.program_id !== resolvedProgramId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot assign question to a level from another program.'
+      });
+    }
+
+    if (targetLevel.language_id && language_id && targetLevel.language_id !== parseInt(language_id, 10)) {
       return res.status(400).json({
         success: false,
         error: 'Selected level does not belong to the selected programming language.'
@@ -286,12 +368,12 @@ async function createQuestion(req, res, next) {
     const createdQuestionId = await db.withTransaction(async (conn) => {
       const [insertRes] = await conn.query(`
         INSERT INTO questions (
-          title, statement, input_format, output_format, constraints_text,
+          program_id, title, statement, input_format, output_format, constraints_text,
           explanation, language_id, level_id,
           contributor_id, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
       `, [
-        title, statement, input_format, output_format, constraints_text,
+        resolvedProgramId, title, statement, input_format, output_format, constraints_text,
         explanation, language_id, level_id,
         userId
       ]);
@@ -363,7 +445,7 @@ async function getMyQuestions(req, res, next) {
         (SELECT COUNT(*) FROM submissions WHERE question_id = q.id) AS total_submissions,
         (SELECT COUNT(DISTINCT user_id) FROM user_solved_questions WHERE question_id = q.id) AS total_solves
       FROM questions q
-      JOIN languages l ON q.language_id = l.id
+      LEFT JOIN languages l ON q.language_id = l.id
       JOIN levels lvl ON q.level_id = lvl.id
       WHERE q.contributor_id = ?
       ORDER BY q.created_at DESC

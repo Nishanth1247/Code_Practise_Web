@@ -309,6 +309,262 @@ async function runIdempotentMigrations(connection, databaseName) {
     changes.push("Added 'changed_fields' column to 'question_audit_logs' table.");
   }
 
+  // ---------------------------------------------------------------------------
+  // 10. Ensure `programs.icon` column exists
+  // ---------------------------------------------------------------------------
+  const [programIconCols] = await connection.query(`
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'programs' AND COLUMN_NAME = 'icon'
+  `, [dbName]);
+
+  if (programIconCols.length === 0) {
+    await connection.query(`
+      ALTER TABLE \`programs\`
+      ADD COLUMN \`icon\` VARCHAR(50) NOT NULL DEFAULT 'Code' AFTER \`description\`;
+    `);
+    changes.push("Added 'icon' column to 'programs' table.");
+  }
+
+  // ---------------------------------------------------------------------------
+  // 11. Ensure `program_languages` has `compiler_id` and `compiler_name`
+  // ---------------------------------------------------------------------------
+  const [progLangCols] = await connection.query(`
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'program_languages'
+  `, [dbName]);
+
+  const progLangColNames = progLangCols.map(c => c.COLUMN_NAME);
+
+  if (!progLangColNames.includes('compiler_id')) {
+    await connection.query(`
+      ALTER TABLE \`program_languages\`
+      ADD COLUMN \`compiler_id\` INT NOT NULL DEFAULT 0 AFTER \`language_id\`;
+    `);
+    changes.push("Added 'compiler_id' column to 'program_languages' table.");
+  }
+
+  if (!progLangColNames.includes('compiler_name')) {
+    await connection.query(`
+      ALTER TABLE \`program_languages\`
+      ADD COLUMN \`compiler_name\` VARCHAR(100) NULL AFTER \`compiler_id\`;
+    `);
+    changes.push("Added 'compiler_name' column to 'program_languages' table.");
+  }
+
+  // ---------------------------------------------------------------------------
+  // 12. Ensure `levels.program_id` column exists and `levels.language_id` is nullable
+  // ---------------------------------------------------------------------------
+  const [levelColsToCheck] = await connection.query(`
+    SELECT COLUMN_NAME, IS_NULLABLE
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'levels' AND COLUMN_NAME IN ('program_id', 'language_id')
+  `, [dbName]);
+
+  const levelColMap = {};
+  levelColsToCheck.forEach(c => { levelColMap[c.COLUMN_NAME] = c; });
+
+  if (!levelColMap.program_id) {
+    await connection.query(`
+      ALTER TABLE \`levels\`
+      ADD COLUMN \`program_id\` INT NULL AFTER \`id\`,
+      ADD INDEX \`idx_levels_program_level\` (\`program_id\`, \`level_number\`);
+    `);
+    changes.push("Added 'program_id' and index 'idx_levels_program_level' to 'levels' table.");
+  }
+
+  if (levelColMap.language_id && levelColMap.language_id.IS_NULLABLE === 'NO') {
+    await connection.query(`
+      ALTER TABLE \`levels\` MODIFY COLUMN \`language_id\` INT NULL;
+    `);
+    changes.push("Made 'levels.language_id' nullable for multi-language program levels.");
+  }
+
+  // ---------------------------------------------------------------------------
+  // 13. Ensure `questions.program_id` column exists and `questions.language_id` is nullable
+  // ---------------------------------------------------------------------------
+  const [questionColsToCheck] = await connection.query(`
+    SELECT COLUMN_NAME, IS_NULLABLE
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'questions' AND COLUMN_NAME IN ('program_id', 'language_id')
+  `, [dbName]);
+
+  const qColMap = {};
+  questionColsToCheck.forEach(c => { qColMap[c.COLUMN_NAME] = c; });
+
+  if (!qColMap.program_id) {
+    await connection.query(`
+      ALTER TABLE \`questions\`
+      ADD COLUMN \`program_id\` INT NULL AFTER \`id\`,
+      ADD INDEX \`idx_questions_program_level\` (\`program_id\`, \`level_id\`);
+    `);
+    changes.push("Added 'program_id' and index 'idx_questions_program_level' to 'questions' table.");
+  }
+
+  if (qColMap.language_id && qColMap.language_id.IS_NULLABLE === 'NO') {
+    await connection.query(`
+      ALTER TABLE \`questions\` MODIFY COLUMN \`language_id\` INT NULL;
+    `);
+    changes.push("Made 'questions.language_id' nullable for multi-compiler program questions.");
+  }
+
+  // ---------------------------------------------------------------------------
+  // 14. Initialize / Migrate independent core Programs (C, C++, Java, Python, DSA)
+  // ---------------------------------------------------------------------------
+  const initialPrograms = [
+    {
+      name: 'C Programming',
+      slug: 'c-programming',
+      description: 'Master memory management, pointers, and systems fundamentals with C.',
+      icon: 'Cpu',
+      langSlug: 'c',
+      compilerId: 50,
+      compilerName: 'GCC 9.2.0'
+    },
+    {
+      name: 'C++ Programming',
+      slug: 'cpp-programming',
+      description: 'Modern object-oriented constructs, STL templates, and high-performance algorithms.',
+      icon: 'Layers',
+      langSlug: 'cpp',
+      compilerId: 54,
+      compilerName: 'GCC 9.2.0'
+    },
+    {
+      name: 'Java Programming',
+      slug: 'java-programming',
+      description: 'Object architecture, clean design patterns, and enterprise backend computing.',
+      icon: 'Terminal',
+      langSlug: 'java',
+      compilerId: 62,
+      compilerName: 'OpenJDK 13'
+    },
+    {
+      name: 'Python Programming',
+      slug: 'python-programming',
+      description: 'Elegant syntax, concise problem-solving, and powerful algorithmic data structures.',
+      icon: 'Code',
+      langSlug: 'python',
+      compilerId: 71,
+      compilerName: 'Python 3.8.1'
+    }
+  ];
+
+  // Map languages by slug
+  const [allLanguages] = await connection.query(`SELECT id, slug, name FROM \`languages\``);
+  const langSlugToId = {};
+  allLanguages.forEach(l => { langSlugToId[l.slug] = l.id; });
+
+  for (const progDef of initialPrograms) {
+    const langId = langSlugToId[progDef.langSlug];
+    if (!langId) continue;
+
+    // Check if program exists
+    let [existingProg] = await connection.query(
+      `SELECT id, name, slug FROM \`programs\` WHERE \`slug\` = ? OR \`name\` = ?`,
+      [progDef.slug, progDef.name]
+    );
+
+    let programId;
+    if (existingProg.length === 0) {
+      const [insertRes] = await connection.query(`
+        INSERT INTO \`programs\` (\`name\`, \`slug\`, \`description\`, \`icon\`, \`status\`)
+        VALUES (?, ?, ?, ?, 'ACTIVE')
+      `, [progDef.name, progDef.slug, progDef.description, progDef.icon]);
+      programId = insertRes.insertId;
+      changes.push(`Created initial independent program '${progDef.name}'.`);
+    } else {
+      programId = existingProg[0].id;
+    }
+
+    // Ensure program_languages has correct compiler details
+    const [existingPl] = await connection.query(
+      `SELECT id, compiler_id FROM \`program_languages\` WHERE \`program_id\` = ? AND \`language_id\` = ?`,
+      [programId, langId]
+    );
+
+    if (existingPl.length === 0) {
+      await connection.query(`
+        INSERT INTO \`program_languages\` (\`program_id\`, \`language_id\`, \`compiler_id\`, \`compiler_name\`)
+        VALUES (?, ?, ?, ?)
+      `, [programId, langId, progDef.compilerId, progDef.compilerName]);
+      changes.push(`Linked compiler '${progDef.compilerName}' to program '${progDef.name}'.`);
+    } else if (!existingPl[0].compiler_id || existingPl[0].compiler_id === 0) {
+      await connection.query(`
+        UPDATE \`program_languages\`
+        SET \`compiler_id\` = ?, \`compiler_name\` = ?
+        WHERE \`id\` = ?
+      `, [progDef.compilerId, progDef.compilerName, existingPl[0].id]);
+      changes.push(`Updated compiler config for program '${progDef.name}' to '${progDef.compilerName}' (ID: ${progDef.compilerId}).`);
+    }
+
+    // Associate unassociated levels for this language with this program
+    const [levelUpdateRes] = await connection.query(`
+      UPDATE \`levels\`
+      SET \`program_id\` = ?
+      WHERE \`language_id\` = ? AND (\`program_id\` IS NULL OR \`program_id\` = 0)
+    `, [programId, langId]);
+
+    if (levelUpdateRes && levelUpdateRes.changedRows > 0) {
+      changes.push(`Associated ${levelUpdateRes.changedRows} level(s) for '${progDef.name}' with program ID ${programId}.`);
+    }
+
+    // Associate unassociated questions for these levels with this program
+    const [qUpdateRes] = await connection.query(`
+      UPDATE \`questions\`
+      SET \`program_id\` = ?
+      WHERE \`level_id\` IN (SELECT \`id\` FROM \`levels\` WHERE \`program_id\` = ?)
+        AND (\`program_id\` IS NULL OR \`program_id\` = 0)
+    `, [programId, programId]);
+
+    if (qUpdateRes && qUpdateRes.changedRows > 0) {
+      changes.push(`Associated ${qUpdateRes.changedRows} question(s) for '${progDef.name}' with program ID ${programId}.`);
+    }
+  }
+
+  // Update DSA program if present: configure compiler IDs on existing program_languages
+  const [dsaProg] = await connection.query(`SELECT id FROM \`programs\` WHERE \`slug\` = 'dsa' OR \`name\` = 'DSA'`);
+  if (dsaProg.length > 0) {
+    const dsaId = dsaProg[0].id;
+    // Set icon for DSA
+    await connection.query(`UPDATE \`programs\` SET \`icon\` = 'GitBranch' WHERE \`id\` = ? AND (\`icon\` IS NULL OR \`icon\` = '' OR \`icon\` = 'Code')`, [dsaId]);
+    
+    // Ensure all 4 compilers have compiler_id populated in program_languages
+    const compilerMap = {
+      1: { id: 50, name: 'GCC 9.2.0' },
+      2: { id: 54, name: 'GCC 9.2.0' },
+      3: { id: 62, name: 'OpenJDK 13' },
+      4: { id: 71, name: 'Python 3.8.1' }
+    };
+    for (const [lId, cInfo] of Object.entries(compilerMap)) {
+      await connection.query(`
+        UPDATE \`program_languages\`
+        SET \`compiler_id\` = ?, \`compiler_name\` = ?
+        WHERE \`program_id\` = ? AND \`language_id\` = ? AND (\`compiler_id\` IS NULL OR \`compiler_id\` = 0)
+      `, [cInfo.id, cInfo.name, dsaId, parseInt(lId, 10)]);
+    }
+
+    // If DSA has no levels yet, seed 5 standard DSA practice levels
+    const [dsaLevels] = await connection.query(`SELECT COUNT(*) AS total FROM \`levels\` WHERE \`program_id\` = ?`, [dsaId]);
+    if (dsaLevels[0].total === 0) {
+      const dsaLevelDefs = [
+        { num: 1, title: 'Arrays & Hashing', desc: 'Hash maps, frequency counters, and contiguous array traversals.' },
+        { num: 2, title: 'Two Pointers & Sliding Window', desc: 'Subarray bounds, pointer convergence, and window optimization.' },
+        { num: 3, title: 'Stacks, Queues & Monotonic Sequences', desc: 'LIFO evaluation, parentheses matching, and monotonic range queries.' },
+        { num: 4, title: 'Binary Search & Trees', desc: 'Logarithmic search bounds, binary trees, and recursive traversals.' },
+        { num: 5, title: 'Graphs & Dynamic Programming', desc: 'Breadth/depth searches, memoization, and optimal substructure.' }
+      ];
+      for (const d of dsaLevelDefs) {
+        await connection.query(`
+          INSERT INTO \`levels\` (\`program_id\`, \`level_number\`, \`title\`, \`description\`, \`enabled\`)
+          VALUES (?, ?, ?, ?, TRUE)
+        `, [dsaId, d.num, d.title, d.desc]);
+      }
+      changes.push(`Created 5 initial levels for 'DSA' track.`);
+    }
+  }
+
   return {
     success: true,
     database: dbName,

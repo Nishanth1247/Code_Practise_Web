@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { LANGUAGE_CONFIG, getCompilerConfig, isSupportedCompilerId } = require('../config/judge0');
 
 /**
  * Fetch high-level platform statistics for Admin Dashboard
@@ -1084,6 +1085,7 @@ async function deleteQuestionAdmin({ questionId, adminId, reason = 'Deleted by a
  */
 async function getQuestionsAdmin({
   search = '',
+  programId = '',
   languageId = '',
   levelId = '',
   status = '',
@@ -1102,6 +1104,11 @@ async function getQuestionsAdmin({
     conditions.push('(q.title LIKE ? OR q.statement LIKE ? OR CAST(q.id AS CHAR) = ?)');
     const term = `%${search.trim()}%`;
     params.push(term, term, search.trim());
+  }
+
+  if (programId && !isNaN(programId)) {
+    conditions.push('q.program_id = ?');
+    params.push(parseInt(programId, 10));
   }
 
   if (languageId && !isNaN(languageId)) {
@@ -1135,12 +1142,16 @@ async function getQuestionsAdmin({
       q.output_format,
       q.constraints_text,
       q.explanation,
+      q.program_id,
       q.language_id,
       q.level_id,
       q.contributor_id,
       q.status,
       q.created_at,
       q.updated_at,
+      p.name AS program_name,
+      p.slug AS program_slug,
+      p.icon AS program_icon,
       l.name AS language_name,
       l.slug AS language_slug,
       lvl.level_number,
@@ -1151,9 +1162,10 @@ async function getQuestionsAdmin({
       (SELECT COUNT(*) FROM question_samples qs WHERE qs.question_id = q.id) AS sample_count,
       (SELECT COUNT(*) FROM question_test_cases qtc WHERE qtc.question_id = q.id) AS test_case_count
     FROM questions q
-    JOIN languages l ON q.language_id = l.id
-    JOIN levels lvl ON q.level_id = lvl.id
-    JOIN users u ON q.contributor_id = u.id
+    LEFT JOIN programs p ON q.program_id = p.id
+    LEFT JOIN languages l ON q.language_id = l.id
+    LEFT JOIN levels lvl ON q.level_id = lvl.id
+    LEFT JOIN users u ON q.contributor_id = u.id
     ${whereClause}
     ORDER BY ${orderClause}
     LIMIT ? OFFSET ?
@@ -1317,24 +1329,62 @@ async function updateQuestionAdmin(questionId, updateData = {}, adminId) {
       }
     }
 
+    // Program ID validation
+    let programId = currentQuestion.program_id;
+    if (updateData.program_id !== undefined) {
+      const parsedProgId = updateData.program_id ? parseInt(updateData.program_id, 10) : null;
+      if (parsedProgId !== null) {
+        if (isNaN(parsedProgId) || parsedProgId < 1) {
+          const err = new Error('Valid program ID is required.');
+          err.statusCode = 400;
+          throw err;
+        }
+        const [progRows] = await conn.query('SELECT id, name FROM programs WHERE id = ?', [parsedProgId]);
+        if (!progRows || progRows.length === 0) {
+          const err = new Error('Selected program does not exist.');
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+      if (parsedProgId !== currentQuestion.program_id) {
+        changedFields.push('program_id');
+        programId = parsedProgId;
+      }
+    }
+
     // Language ID validation
     let languageId = currentQuestion.language_id;
     if (updateData.language_id !== undefined) {
-      const parsedLangId = parseInt(updateData.language_id, 10);
-      if (isNaN(parsedLangId) || parsedLangId < 1) {
-        const err = new Error('Valid language ID is required.');
-        err.statusCode = 400;
-        throw err;
-      }
+      const parsedLangId = updateData.language_id ? parseInt(updateData.language_id, 10) : null;
+      if (parsedLangId !== null) {
+        if (isNaN(parsedLangId) || parsedLangId < 1) {
+          const err = new Error('Valid language ID is required.');
+          err.statusCode = 400;
+          throw err;
+        }
 
-      const [langRows] = await conn.query(
-        'SELECT id, name, slug FROM languages WHERE id = ? AND enabled = TRUE',
-        [parsedLangId]
-      );
-      if (!langRows || langRows.length === 0) {
-        const err = new Error('Selected programming language does not exist or is disabled.');
-        err.statusCode = 400;
-        throw err;
+        const [langRows] = await conn.query(
+          'SELECT id, name, slug FROM languages WHERE id = ? AND enabled = TRUE',
+          [parsedLangId]
+        );
+        if (!langRows || langRows.length === 0) {
+          const err = new Error('Selected programming language does not exist or is disabled.');
+          err.statusCode = 400;
+          throw err;
+        }
+
+        // If program is set, verify the language is an allowed compiler for this program
+        if (programId) {
+          const [plRows] = await conn.query(
+            'SELECT id FROM program_languages WHERE program_id = ? AND language_id = ?',
+            [programId, parsedLangId]
+          );
+          if (!plRows || plRows.length === 0) {
+            const err = new Error('The selected programming language is not supported by this program.');
+            err.statusCode = 400;
+            throw err;
+          }
+        }
       }
 
       if (parsedLangId !== currentQuestion.language_id) {
@@ -1343,9 +1393,9 @@ async function updateQuestionAdmin(questionId, updateData = {}, adminId) {
       }
     }
 
-    // Level ID validation (must belong to target language)
+    // Level ID validation (must belong to target program and match language if applicable)
     let levelId = currentQuestion.level_id;
-    if (updateData.level_id !== undefined || updateData.language_id !== undefined) {
+    if (updateData.level_id !== undefined || updateData.program_id !== undefined || updateData.language_id !== undefined) {
       const targetLevelId = updateData.level_id !== undefined ? parseInt(updateData.level_id, 10) : currentQuestion.level_id;
       if (isNaN(targetLevelId) || targetLevelId < 1) {
         const err = new Error('Valid level ID is required.');
@@ -1354,13 +1404,34 @@ async function updateQuestionAdmin(questionId, updateData = {}, adminId) {
       }
 
       const [lvlRows] = await conn.query(
-        'SELECT id, level_number, title FROM levels WHERE id = ? AND language_id = ?',
-        [targetLevelId, languageId]
+        'SELECT id, program_id, language_id, level_number, title FROM levels WHERE id = ?',
+        [targetLevelId]
       );
       if (!lvlRows || lvlRows.length === 0) {
+        const err = new Error('Selected level does not exist.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const targetLevel = lvlRows[0];
+
+      // CRITICAL: Prevent assigning a question to a level from another program!
+      if (programId && targetLevel.program_id && targetLevel.program_id !== programId) {
+        const err = new Error('Cannot assign question to a level from another program.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      // If level is language-specific and languageId is provided, verify match
+      if (targetLevel.language_id && languageId && targetLevel.language_id !== languageId) {
         const err = new Error('Selected level does not belong to the selected programming language.');
         err.statusCode = 400;
         throw err;
+      }
+
+      // If programId wasn't explicitly supplied but level has program_id, sync programId
+      if (!programId && targetLevel.program_id) {
+        programId = targetLevel.program_id;
       }
 
       if (targetLevelId !== currentQuestion.level_id) {
@@ -1389,12 +1460,12 @@ async function updateQuestionAdmin(questionId, updateData = {}, adminId) {
     // Update questions table
     await conn.query(`
       UPDATE questions
-      SET title = ?, statement = ?, input_format = ?, output_format = ?,
+      SET program_id = ?, title = ?, statement = ?, input_format = ?, output_format = ?,
           constraints_text = ?, explanation = ?, language_id = ?, level_id = ?,
           status = ?
       WHERE id = ?
     `, [
-      title, statement, inputFormat, outputFormat,
+      programId, title, statement, inputFormat, outputFormat,
       constraintsText, explanation, languageId, levelId,
       finalStatus, qId
     ]);
@@ -1539,6 +1610,7 @@ async function getProgramsAdmin({
       p.name,
       p.slug,
       p.description,
+      p.icon,
       p.status,
       p.created_at,
       p.updated_at
@@ -1548,39 +1620,47 @@ async function getProgramsAdmin({
     LIMIT ? OFFSET ?
   `, [...params, safeLimit, offset]);
 
-  // Enrich each program with its enabled languages and live counts
+  // Enrich each program with its enabled compilers and direct level/question counts
   const enriched = [];
   for (const prog of programs) {
-    const langs = await db.query(`
-      SELECT l.id, l.name, l.slug
+    const compilers = await db.query(`
+      SELECT
+        pl.compiler_id,
+        pl.compiler_name,
+        l.id AS language_id,
+        l.name AS language_name,
+        l.slug AS language_slug
       FROM program_languages pl
       JOIN languages l ON pl.language_id = l.id
       WHERE pl.program_id = ?
       ORDER BY l.name ASC
     `, [prog.id]);
 
-    const langIds = langs.map(l => l.id);
-    let levelCount = 0;
-    let questionCount = 0;
+    const lvlRes = await db.query(`
+      SELECT COUNT(*) AS total, COUNT(CASE WHEN enabled = TRUE THEN 1 END) AS enabled_total
+      FROM levels
+      WHERE program_id = ?
+    `, [prog.id]);
+    const levelCount = parseInt(lvlRes[0]?.total || 0, 10);
+    const enabledLevelCount = parseInt(lvlRes[0]?.enabled_total || 0, 10);
 
-    if (langIds.length > 0) {
-      const lvlRes = await db.query(`
-        SELECT COUNT(*) AS total FROM levels WHERE language_id IN (?)
-      `, [langIds]);
-      levelCount = parseInt(lvlRes[0]?.total || 0, 10);
-
-      const qRes = await db.query(`
-        SELECT COUNT(*) AS total FROM questions WHERE language_id IN (?) AND status = 'ACTIVE'
-      `, [langIds]);
-      questionCount = parseInt(qRes[0]?.total || 0, 10);
-    }
+    const qRes = await db.query(`
+      SELECT COUNT(*) AS total, COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END) AS active_total
+      FROM questions
+      WHERE program_id = ?
+    `, [prog.id]);
+    const questionCount = parseInt(qRes[0]?.total || 0, 10);
+    const activeQuestionCount = parseInt(qRes[0]?.active_total || 0, 10);
 
     enriched.push({
       ...prog,
-      languages: langs,
-      languageCount: langs.length,
+      compilers,
+      languages: compilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug })),
+      compilerCount: compilers.length,
       levelCount,
-      questionCount
+      enabledLevelCount,
+      questionCount,
+      activeQuestionCount
     });
   }
 
@@ -1613,7 +1693,7 @@ async function getProgramsAdmin({
 }
 
 /**
- * Get program details by ID, including languages, levels, and associated questions
+ * Get program details by ID, including compilers, independent levels, and associated questions
  */
 async function getProgramByIdAdmin(programId) {
   const pId = parseInt(programId, 10);
@@ -1632,52 +1712,170 @@ async function getProgramByIdAdmin(programId) {
 
   const program = programs[0];
 
-  const languages = await db.query(`
-    SELECT l.id, l.name, l.slug, l.enabled
+  const compilers = await db.query(`
+    SELECT
+      pl.compiler_id,
+      pl.compiler_name,
+      l.id AS language_id,
+      l.name AS language_name,
+      l.slug AS language_slug,
+      l.enabled AS language_enabled
     FROM program_languages pl
     JOIN languages l ON pl.language_id = l.id
     WHERE pl.program_id = ?
     ORDER BY l.name ASC
   `, [pId]);
 
-  const langIds = languages.map(l => l.id);
-  let levels = [];
-  let questions = [];
+  // Fetch independent levels belonging directly to this program
+  const levels = await db.query(`
+    SELECT
+      lvl.id,
+      lvl.program_id,
+      lvl.level_number,
+      lvl.title,
+      lvl.description,
+      lvl.enabled,
+      COUNT(DISTINCT q.id) AS total_questions,
+      COUNT(DISTINCT CASE WHEN q.status = 'ACTIVE' THEN q.id END) AS active_questions,
+      COUNT(DISTINCT CASE WHEN q.status = 'REMOVED' THEN q.id END) AS removed_questions
+    FROM levels lvl
+    LEFT JOIN questions q ON lvl.id = q.level_id
+    WHERE lvl.program_id = ?
+    GROUP BY lvl.id, lvl.program_id, lvl.level_number, lvl.title, lvl.description, lvl.enabled
+    ORDER BY lvl.level_number ASC
+  `, [pId]);
 
-  if (langIds.length > 0) {
-    levels = await db.query(`
-      SELECT lvl.id, lvl.language_id, lvl.level_number, lvl.title, lvl.enabled, l.name AS language_name
-      FROM levels lvl
-      JOIN languages l ON lvl.language_id = l.id
-      WHERE lvl.language_id IN (?)
-      ORDER BY l.name ASC, lvl.level_number ASC
-    `, [langIds]);
-
-    questions = await db.query(`
-      SELECT q.id, q.title, q.language_id, q.level_id, q.status, l.name AS language_name, lvl.level_number
-      FROM questions q
-      JOIN languages l ON q.language_id = l.id
-      JOIN levels lvl ON q.level_id = lvl.id
-      WHERE q.language_id IN (?)
-      ORDER BY q.id DESC
-      LIMIT 20
-    `, [langIds]);
-  }
+  // Fetch recent questions for this program
+  const recentQuestions = await db.query(`
+    SELECT
+      q.id,
+      q.title,
+      q.language_id,
+      q.level_id,
+      q.status,
+      q.created_at,
+      l.name AS language_name,
+      lvl.level_number,
+      lvl.title AS level_title
+    FROM questions q
+    LEFT JOIN languages l ON q.language_id = l.id
+    LEFT JOIN levels lvl ON q.level_id = lvl.id
+    WHERE q.program_id = ?
+    ORDER BY q.id DESC
+    LIMIT 20
+  `, [pId]);
 
   return {
     program,
-    languages,
+    compilers,
+    languages: compilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug })),
     levels,
-    recentQuestions: questions,
+    recentQuestions,
     totalLevels: levels.length,
-    totalQuestions: questions.length
+    totalQuestions: recentQuestions.length
   };
 }
 
 /**
- * Create a new program with supported languages
+ * Validate compilers / language_ids against system LANGUAGE_CONFIG
  */
-async function createProgramAdmin({ name, description = '', status = 'ACTIVE', language_ids = [] }, adminId) {
+async function resolveAndValidateCompilers({ compilers, language_ids }) {
+  const compilerList = [];
+
+  if (Array.isArray(compilers) && compilers.length > 0) {
+    for (const c of compilers) {
+      const compId = parseInt(c.compiler_id, 10);
+      if (isNaN(compId) || !isSupportedCompilerId(compId)) {
+        const err = new Error(`Unsupported or invalid compiler runtime ID: ${c.compiler_id}. Supported runtimes: C (50), C++ (54), Java (62), Python (71).`);
+        err.statusCode = 400;
+        throw err;
+      }
+      const conf = getCompilerConfig(compId);
+      const langId = c.language_id ? parseInt(c.language_id, 10) : null;
+
+      let langRecord;
+      if (langId) {
+        const found = await db.query('SELECT id, name, slug FROM languages WHERE id = ?', [langId]);
+        if (!found || found.length === 0) {
+          const err = new Error(`Language ID ${langId} does not exist.`);
+          err.statusCode = 400;
+          throw err;
+        }
+        langRecord = found[0];
+      } else if (conf) {
+        const found = await db.query('SELECT id, name, slug FROM languages WHERE slug = ?', [conf.slug]);
+        if (!found || found.length === 0) {
+          const err = new Error(`Language for compiler ${conf.slug} does not exist.`);
+          err.statusCode = 400;
+          throw err;
+        }
+        langRecord = found[0];
+      }
+
+      compilerList.push({
+        language_id: langRecord.id,
+        compiler_id: compId,
+        compiler_name: c.compiler_name || conf.compilerName || conf.displayName,
+        language_name: langRecord.name,
+        language_slug: langRecord.slug
+      });
+    }
+  } else if (Array.isArray(language_ids) && language_ids.length > 0) {
+    const parsedLangIds = [...new Set(language_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0))];
+    if (parsedLangIds.length === 0) {
+      const err = new Error('At least one supported programming language must be selected for the program.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const validLangs = await db.query(
+      'SELECT id, name, slug FROM languages WHERE id IN (?) AND enabled = TRUE',
+      [parsedLangIds]
+    );
+
+    if (validLangs.length !== parsedLangIds.length) {
+      const err = new Error('One or more selected programming languages are invalid or unsupported.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    for (const l of validLangs) {
+      const conf = getCompilerConfig(l.slug);
+      if (!conf) {
+        const err = new Error(`No Judge0 compiler configuration found for language '${l.name}'.`);
+        err.statusCode = 400;
+        throw err;
+      }
+      compilerList.push({
+        language_id: l.id,
+        compiler_id: conf.judge0Id,
+        compiler_name: conf.compilerName || conf.displayName,
+        language_name: l.name,
+        language_slug: l.slug
+      });
+    }
+  } else {
+    const err = new Error('At least one supported programming language or compiler must be selected for the program.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return compilerList;
+}
+
+/**
+ * Create a new program with independent levels and allowed compilers
+ */
+async function createProgramAdmin({
+  name,
+  description = '',
+  icon = 'Code',
+  status = 'ACTIVE',
+  compilers = [],
+  language_ids = [],
+  level_count = 5,
+  levels = []
+}, adminId) {
   if (!name || typeof name !== 'string' || name.trim().length < 3 || name.trim().length > 100) {
     const err = new Error('Program name must be between 3 and 100 characters.');
     err.statusCode = 400;
@@ -1706,30 +1904,73 @@ async function createProgramAdmin({ name, description = '', status = 'ACTIVE', l
     throw err;
   }
 
-  // Validate language_ids
-  if (!Array.isArray(language_ids) || language_ids.length === 0) {
-    const err = new Error('At least one supported programming language must be selected for the program.');
-    err.statusCode = 400;
-    throw err;
-  }
+  // Clean icon
+  const cleanIcon = icon && typeof icon === 'string' && icon.trim() ? icon.trim() : 'Code';
 
-  const parsedLangIds = [...new Set(language_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0))];
-  if (parsedLangIds.length === 0) {
-    const err = new Error('At least one supported programming language must be selected for the program.');
-    err.statusCode = 400;
-    throw err;
-  }
+  // Validate and resolve compilers
+  const validatedCompilers = await resolveAndValidateCompilers({ compilers, language_ids });
 
-  // Verify all languages exist and are enabled
-  const validLangs = await db.query(
-    'SELECT id, name, slug FROM languages WHERE id IN (?) AND enabled = TRUE',
-    [parsedLangIds]
-  );
+  // Validate or generate levels
+  const levelRecords = [];
+  if (Array.isArray(levels) && levels.length > 0) {
+    const seenNumbers = new Set();
+    for (let i = 0; i < levels.length; i++) {
+      const lvl = levels[i];
+      const num = parseInt(lvl.level_number || i + 1, 10);
+      if (isNaN(num) || num < 1) {
+        const err = new Error(`Level #${i + 1} has an invalid level number.`);
+        err.statusCode = 400;
+        throw err;
+      }
+      if (seenNumbers.has(num)) {
+        const err = new Error(`Duplicate level number ${num} in level list.`);
+        err.statusCode = 400;
+        throw err;
+      }
+      seenNumbers.add(num);
 
-  if (validLangs.length !== parsedLangIds.length) {
-    const err = new Error('One or more selected programming languages are invalid or unsupported.');
-    err.statusCode = 400;
-    throw err;
+      const title = lvl.title ? String(lvl.title).trim() : `Level ${num}`;
+      if (title.length < 2 || title.length > 100) {
+        const err = new Error(`Level ${num} title must be between 2 and 100 characters.`);
+        err.statusCode = 400;
+        throw err;
+      }
+
+      levelRecords.push({
+        level_number: num,
+        title,
+        description: lvl.description ? String(lvl.description).trim() : '',
+        enabled: lvl.enabled !== false
+      });
+    }
+  } else {
+    // Generate from level_count
+    const count = Math.min(20, Math.max(1, parseInt(level_count, 10) || 5));
+    const defaultTitles = [
+      'Fundamentals & Basic Syntax',
+      'Variables, Operators & Expressions',
+      'Control Flow & Decisions',
+      'Loops & Iterative Logic',
+      'Arrays & Sequence Structures',
+      'Functions & Modular Design',
+      'Pointers, References & Memory',
+      'Object-Oriented Design & Classes',
+      'Data Structures & STL Basics',
+      'Recursion & Divide and Conquer',
+      'Sorting, Searching & Two Pointers',
+      'Stacks, Queues & Monotonic Sequences',
+      'Trees, Heaps & Priority Queues',
+      'Graphs, BFS & DFS Traversals',
+      'Dynamic Programming & Greedy Strategies'
+    ];
+    for (let num = 1; num <= count; num++) {
+      levelRecords.push({
+        level_number: num,
+        title: defaultTitles[num - 1] || `Level ${num}: Advanced Topics`,
+        description: `Practice challenges and exercises for level ${num}.`,
+        enabled: true
+      });
+    }
   }
 
   // Generate unique slug
@@ -1744,39 +1985,60 @@ async function createProgramAdmin({ name, description = '', status = 'ACTIVE', l
 
   return await db.withTransaction(async (conn) => {
     const [ins] = await conn.query(
-      'INSERT INTO programs (name, slug, description, status) VALUES (?, ?, ?, ?)',
-      [cleanName, slug, description ? description.trim() : '', cleanStatus]
+      'INSERT INTO programs (name, slug, description, icon, status) VALUES (?, ?, ?, ?, ?)',
+      [cleanName, slug, description ? description.trim() : '', cleanIcon, cleanStatus]
     );
 
     const programId = ins.insertId;
 
-    for (const langId of parsedLangIds) {
+    // Insert compilers
+    for (const c of validatedCompilers) {
       await conn.query(
-        'INSERT INTO program_languages (program_id, language_id) VALUES (?, ?)',
-        [programId, langId]
+        'INSERT INTO program_languages (program_id, language_id, compiler_id, compiler_name) VALUES (?, ?, ?, ?)',
+        [programId, c.language_id, c.compiler_id, c.compiler_name]
+      );
+    }
+
+    // Insert independent levels
+    for (const lvl of levelRecords) {
+      await conn.query(
+        'INSERT INTO levels (program_id, level_number, title, description, enabled) VALUES (?, ?, ?, ?, ?)',
+        [programId, lvl.level_number, lvl.title, lvl.description, lvl.enabled]
       );
     }
 
     return {
       success: true,
-      message: `Program '${cleanName}' created successfully.`,
+      message: `Program '${cleanName}' created successfully with ${levelRecords.length} independent level(s) and ${validatedCompilers.length} compiler(s).`,
       program: {
         id: programId,
         name: cleanName,
         slug,
         description: description ? description.trim() : '',
+        icon: cleanIcon,
         status: cleanStatus,
-        languages: validLangs
+        compilers: validatedCompilers,
+        languages: validatedCompilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug })),
+        levels: levelRecords
       }
     };
   });
 }
 
 /**
- * Update an existing program (name, description, status, languages)
- * Preserves all questions and levels without disruption.
+ * Update an existing program with independent level management and safe populated level checks
  */
-async function updateProgramAdmin(programId, { name, description, status, language_ids }, adminId) {
+async function updateProgramAdmin(programId, {
+  name,
+  description,
+  icon,
+  status,
+  compilers,
+  language_ids,
+  level_count,
+  levels,
+  confirm_level_reduction = false
+}, adminId) {
   const pId = parseInt(programId, 10);
   if (isNaN(pId) || pId < 1) {
     const err = new Error('Invalid program ID.');
@@ -1794,6 +2056,7 @@ async function updateProgramAdmin(programId, { name, description, status, langua
   const currentProgram = existing[0];
   let newName = currentProgram.name;
   let newDescription = currentProgram.description;
+  let newIcon = currentProgram.icon || 'Code';
   let newStatus = currentProgram.status;
 
   if (name !== undefined) {
@@ -1821,6 +2084,10 @@ async function updateProgramAdmin(programId, { name, description, status, langua
     newDescription = typeof description === 'string' ? description.trim() : '';
   }
 
+  if (icon !== undefined) {
+    newIcon = typeof icon === 'string' && icon.trim() ? icon.trim() : 'Code';
+  }
+
   if (status !== undefined) {
     const cleanStatus = String(status).toUpperCase().trim();
     if (!['ACTIVE', 'INACTIVE'].includes(cleanStatus)) {
@@ -1831,48 +2098,150 @@ async function updateProgramAdmin(programId, { name, description, status, langua
     newStatus = cleanStatus;
   }
 
-  let parsedLangIds = null;
-  let validLangs = null;
-  if (language_ids !== undefined) {
-    if (!Array.isArray(language_ids) || language_ids.length === 0) {
-      const err = new Error('At least one supported programming language must be selected for the program.');
-      err.statusCode = 400;
-      throw err;
-    }
-    parsedLangIds = [...new Set(language_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0))];
-    if (parsedLangIds.length === 0) {
-      const err = new Error('At least one supported programming language must be selected for the program.');
-      err.statusCode = 400;
-      throw err;
+  // Validate compilers if provided
+  let validatedCompilers = null;
+  if (compilers !== undefined || language_ids !== undefined) {
+    validatedCompilers = await resolveAndValidateCompilers({ compilers, language_ids });
+  }
+
+  // Handle Level updates safely
+  let levelUpdatePlan = null;
+  if (levels !== undefined || level_count !== undefined) {
+    const currentLevelsWithQuestions = await db.query(`
+      SELECT
+        lvl.id,
+        lvl.level_number,
+        lvl.title,
+        COUNT(q.id) AS question_count
+      FROM levels lvl
+      LEFT JOIN questions q ON lvl.id = q.level_id
+      WHERE lvl.program_id = ?
+      GROUP BY lvl.id, lvl.level_number, lvl.title
+    `, [pId]);
+
+    const newLevelList = [];
+    if (Array.isArray(levels) && levels.length > 0) {
+      const seenNumbers = new Set();
+      for (let i = 0; i < levels.length; i++) {
+        const lvl = levels[i];
+        const num = parseInt(lvl.level_number || i + 1, 10);
+        if (isNaN(num) || num < 1) {
+          const err = new Error(`Level #${i + 1} has an invalid level number.`);
+          err.statusCode = 400;
+          throw err;
+        }
+        if (seenNumbers.has(num)) {
+          const err = new Error(`Duplicate level number ${num} in level list.`);
+          err.statusCode = 400;
+          throw err;
+        }
+        seenNumbers.add(num);
+
+        const title = lvl.title ? String(lvl.title).trim() : `Level ${num}`;
+        if (title.length < 2 || title.length > 100) {
+          const err = new Error(`Level ${num} title must be between 2 and 100 characters.`);
+          err.statusCode = 400;
+          throw err;
+        }
+
+        newLevelList.push({
+          id: lvl.id ? parseInt(lvl.id, 10) : null,
+          level_number: num,
+          title,
+          description: lvl.description ? String(lvl.description).trim() : '',
+          enabled: lvl.enabled !== false
+        });
+      }
+    } else if (level_count !== undefined) {
+      const count = Math.min(20, Math.max(1, parseInt(level_count, 10) || 5));
+      for (let num = 1; num <= count; num++) {
+        const existingLvl = currentLevelsWithQuestions.find(l => l.level_number === num);
+        newLevelList.push({
+          id: existingLvl?.id || null,
+          level_number: num,
+          title: existingLvl?.title || `Level ${num}`,
+          description: '',
+          enabled: true
+        });
+      }
     }
 
-    validLangs = await db.query(
-      'SELECT id, name, slug FROM languages WHERE id IN (?) AND enabled = TRUE',
-      [parsedLangIds]
+    // Identify levels that would be deleted
+    const newLevelIds = new Set(newLevelList.map(l => l.id).filter(Boolean));
+    const levelsToDelete = currentLevelsWithQuestions.filter(
+      cur => !newLevelIds.has(cur.id) && !newLevelList.some(nl => nl.level_number === cur.level_number)
     );
 
-    if (validLangs.length !== parsedLangIds.length) {
-      const err = new Error('One or more selected programming languages are invalid or unsupported.');
+    // CRITICAL: Changing a program's level count later must not silently delete levels that already contain questions!
+    const populatedToDelete = levelsToDelete.filter(l => parseInt(l.question_count, 10) > 0);
+    if (populatedToDelete.length > 0 && !confirm_level_reduction) {
+      const summary = populatedToDelete.map(l => `Level ${l.level_number} ("${l.title}", ${l.question_count} questions)`).join(', ');
+      const err = new Error(
+        `Cannot remove populated levels without explicit confirmation. Populated level(s): ${summary}. Please confirm level reduction or reassign questions before proceeding.`
+      );
       err.statusCode = 400;
+      err.code = 'POPULATED_LEVEL_REDUCTION';
+      err.populatedLevels = populatedToDelete;
       throw err;
     }
+
+    levelUpdatePlan = {
+      newLevelList,
+      levelsToDelete
+    };
   }
 
   return await db.withTransaction(async (conn) => {
     await conn.query(
-      'UPDATE programs SET name = ?, description = ?, status = ? WHERE id = ?',
-      [newName, newDescription, newStatus, pId]
+      'UPDATE programs SET name = ?, description = ?, icon = ?, status = ? WHERE id = ?',
+      [newName, newDescription, newIcon, newStatus, pId]
     );
 
-    if (parsedLangIds !== null) {
+    if (validatedCompilers !== null) {
       await conn.query('DELETE FROM program_languages WHERE program_id = ?', [pId]);
-      for (const langId of parsedLangIds) {
+      for (const c of validatedCompilers) {
         await conn.query(
-          'INSERT INTO program_languages (program_id, language_id) VALUES (?, ?)',
-          [pId, langId]
+          'INSERT INTO program_languages (program_id, language_id, compiler_id, compiler_name) VALUES (?, ?, ?, ?)',
+          [pId, c.language_id, c.compiler_id, c.compiler_name]
         );
       }
     }
+
+    if (levelUpdatePlan) {
+      // Handle deleted levels safely
+      for (const delLvl of levelUpdatePlan.levelsToDelete) {
+        // Unlink questions rather than deleting them
+        await conn.query('UPDATE questions SET level_id = 0 WHERE level_id = ?', [delLvl.id]).catch(() => {});
+        await conn.query('DELETE FROM levels WHERE id = ?', [delLvl.id]);
+      }
+
+      // Sync updated and new levels
+      for (const lvl of levelUpdatePlan.newLevelList) {
+        if (lvl.id) {
+          await conn.query(
+            'UPDATE levels SET level_number = ?, title = ?, description = ?, enabled = ? WHERE id = ? AND program_id = ?',
+            [lvl.level_number, lvl.title, lvl.description, lvl.enabled, lvl.id, pId]
+          );
+        } else {
+          await conn.query(
+            'INSERT INTO levels (program_id, level_number, title, description, enabled) VALUES (?, ?, ?, ?, ?)',
+            [pId, lvl.level_number, lvl.title, lvl.description, lvl.enabled]
+          );
+        }
+      }
+    }
+
+    const finalCompilers = validatedCompilers || await db.query(`
+      SELECT
+        pl.compiler_id,
+        pl.compiler_name,
+        l.id AS language_id,
+        l.name AS language_name,
+        l.slug AS language_slug
+      FROM program_languages pl
+      JOIN languages l ON pl.language_id = l.id
+      WHERE pl.program_id = ?
+    `, [pId]);
 
     return {
       success: true,
@@ -1881,17 +2250,18 @@ async function updateProgramAdmin(programId, { name, description, status, langua
         id: pId,
         name: newName,
         description: newDescription,
+        icon: newIcon,
         status: newStatus,
-        languages: validLangs
+        compilers: finalCompilers,
+        languages: finalCompilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug }))
       }
     };
   });
 }
 
 /**
- * Delete a program
- * Deletes the program and its program_languages links.
- * All existing questions, levels, and user submissions remain completely intact.
+ * Delete a program safely
+ * Preserves all questions and submissions by disassociating them.
  */
 async function deleteProgramAdmin(programId, adminId) {
   const pId = parseInt(programId, 10);
@@ -1908,11 +2278,231 @@ async function deleteProgramAdmin(programId, adminId) {
     throw err;
   }
 
-  await db.query('DELETE FROM programs WHERE id = ?', [pId]);
+  await db.withTransaction(async (conn) => {
+    // Unlink program_id on questions so questions are NEVER lost
+    await conn.query('UPDATE questions SET program_id = NULL WHERE program_id = ?', [pId]);
+    await conn.query('UPDATE levels SET program_id = NULL WHERE program_id = ?', [pId]);
+    await conn.query('DELETE FROM programs WHERE id = ?', [pId]);
+  });
 
   return {
     success: true,
-    message: `Program '${existing[0].name}' deleted successfully. Associated questions and levels remain intact.`
+    message: `Program '${existing[0].name}' deleted successfully. Associated questions remain preserved in the system.`
+  };
+}
+
+/**
+ * Program Level Sub-resources: List levels for a program
+ */
+async function getProgramLevelsAdmin(programId) {
+  const pId = parseInt(programId, 10);
+  if (isNaN(pId) || pId < 1) {
+    const err = new Error('Invalid program ID.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const levels = await db.query(`
+    SELECT
+      lvl.id,
+      lvl.program_id,
+      lvl.level_number,
+      lvl.title,
+      lvl.description,
+      lvl.enabled,
+      COUNT(DISTINCT q.id) AS total_questions,
+      COUNT(DISTINCT CASE WHEN q.status = 'ACTIVE' THEN q.id END) AS active_questions,
+      COUNT(DISTINCT CASE WHEN q.status = 'REMOVED' THEN q.id END) AS removed_questions
+    FROM levels lvl
+    LEFT JOIN questions q ON lvl.id = q.level_id
+    WHERE lvl.program_id = ?
+    GROUP BY lvl.id, lvl.program_id, lvl.level_number, lvl.title, lvl.description, lvl.enabled
+    ORDER BY lvl.level_number ASC
+  `, [pId]);
+
+  return levels.map(l => ({
+    id: l.id,
+    programId: l.program_id,
+    levelNumber: l.level_number,
+    title: l.title,
+    description: l.description,
+    enabled: Boolean(l.enabled),
+    totalQuestions: parseInt(l.total_questions, 10),
+    activeQuestions: parseInt(l.active_questions, 10),
+    removedQuestions: parseInt(l.removed_questions, 10),
+    isEmpty: parseInt(l.total_questions, 10) === 0
+  }));
+}
+
+/**
+ * Program Level Sub-resources: Create an independent level in a program
+ */
+async function createProgramLevelAdmin(programId, { level_number, title, description = '', enabled = true }) {
+  const pId = parseInt(programId, 10);
+  if (isNaN(pId) || pId < 1) {
+    const err = new Error('Invalid program ID.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const [progRows] = await db.query('SELECT id, name FROM programs WHERE id = ?', [pId]);
+  if (!progRows || progRows.length === 0) {
+    const err = new Error('Program not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  let finalNumber = parseInt(level_number, 10);
+  if (isNaN(finalNumber) || finalNumber < 1) {
+    const [maxRes] = await db.query('SELECT MAX(level_number) AS max_num FROM levels WHERE program_id = ?', [pId]);
+    finalNumber = (maxRes[0]?.max_num || 0) + 1;
+  }
+
+  const cleanTitle = title ? String(title).trim() : `Level ${finalNumber}`;
+  if (cleanTitle.length < 2 || cleanTitle.length > 100) {
+    const err = new Error('Level title must be between 2 and 100 characters.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const [existing] = await db.query(
+    'SELECT id FROM levels WHERE program_id = ? AND level_number = ?',
+    [pId, finalNumber]
+  );
+  if (existing && existing.length > 0) {
+    const err = new Error(`Level number ${finalNumber} already exists in this program.`);
+    err.statusCode = 409;
+    throw err;
+  }
+
+  const [res] = await db.query(
+    'INSERT INTO levels (program_id, level_number, title, description, enabled) VALUES (?, ?, ?, ?, ?)',
+    [pId, finalNumber, cleanTitle, description ? String(description).trim() : '', Boolean(enabled)]
+  );
+
+  return {
+    success: true,
+    message: `Level ${finalNumber} created successfully in program '${progRows[0].name}'.`,
+    level: {
+      id: res.insertId,
+      programId: pId,
+      levelNumber: finalNumber,
+      title: cleanTitle,
+      description: description ? String(description).trim() : '',
+      enabled: Boolean(enabled)
+    }
+  };
+}
+
+/**
+ * Program Level Sub-resources: Update a level in a program
+ */
+async function updateProgramLevelAdmin(programId, levelId, { level_number, title, description, enabled }) {
+  const pId = parseInt(programId, 10);
+  const lId = parseInt(levelId, 10);
+
+  const [current] = await db.query('SELECT * FROM levels WHERE id = ? AND program_id = ?', [lId, pId]);
+  if (!current || current.length === 0) {
+    const err = new Error('Level not found in the specified program.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const cur = current[0];
+  let newNum = cur.level_number;
+  if (level_number !== undefined) {
+    const num = parseInt(level_number, 10);
+    if (isNaN(num) || num < 1) {
+      const err = new Error('Invalid level number.');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (num !== cur.level_number) {
+      const [conflict] = await db.query('SELECT id FROM levels WHERE program_id = ? AND level_number = ? AND id != ?', [pId, num, lId]);
+      if (conflict && conflict.length > 0) {
+        const err = new Error(`Level number ${num} is already used in this program.`);
+        err.statusCode = 409;
+        throw err;
+      }
+      newNum = num;
+    }
+  }
+
+  let newTitle = cur.title;
+  if (title !== undefined) {
+    const clean = String(title).trim();
+    if (clean.length < 2 || clean.length > 100) {
+      const err = new Error('Level title must be between 2 and 100 characters.');
+      err.statusCode = 400;
+      throw err;
+    }
+    newTitle = clean;
+  }
+
+  let newDesc = cur.description;
+  if (description !== undefined) {
+    newDesc = typeof description === 'string' ? description.trim() : '';
+  }
+
+  let newEnabled = cur.enabled;
+  if (enabled !== undefined) {
+    newEnabled = Boolean(enabled);
+  }
+
+  await db.query(
+    'UPDATE levels SET level_number = ?, title = ?, description = ?, enabled = ? WHERE id = ?',
+    [newNum, newTitle, newDesc, newEnabled, lId]
+  );
+
+  return {
+    success: true,
+    message: `Level ${newNum} updated successfully.`,
+    level: {
+      id: lId,
+      programId: pId,
+      levelNumber: newNum,
+      title: newTitle,
+      description: newDesc,
+      enabled: Boolean(newEnabled)
+    }
+  };
+}
+
+/**
+ * Program Level Sub-resources: Delete a level with populated question safeguard
+ */
+async function deleteProgramLevelAdmin(programId, levelId, { force = false } = {}) {
+  const pId = parseInt(programId, 10);
+  const lId = parseInt(levelId, 10);
+
+  const [current] = await db.query('SELECT * FROM levels WHERE id = ? AND program_id = ?', [lId, pId]);
+  if (!current || current.length === 0) {
+    const err = new Error('Level not found in the specified program.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const [qCountRes] = await db.query('SELECT COUNT(*) AS total FROM questions WHERE level_id = ?', [lId]);
+  const questionCount = parseInt(qCountRes[0]?.total || 0, 10);
+
+  if (questionCount > 0 && !force) {
+    const err = new Error(`Cannot delete Level ${current[0].level_number} ("${current[0].title}") because it contains ${questionCount} question(s). Reassign questions or confirm force deletion.`);
+    err.statusCode = 400;
+    err.code = 'POPULATED_LEVEL_DELETION';
+    err.questionCount = questionCount;
+    throw err;
+  }
+
+  await db.withTransaction(async (conn) => {
+    if (questionCount > 0) {
+      await conn.query('UPDATE questions SET level_id = 0 WHERE level_id = ?', [lId]).catch(() => {});
+    }
+    await conn.query('DELETE FROM levels WHERE id = ?', [lId]);
+  });
+
+  return {
+    success: true,
+    message: `Level ${current[0].level_number} deleted successfully.`
   };
 }
 
@@ -1939,6 +2529,10 @@ module.exports = {
   getProgramByIdAdmin,
   createProgramAdmin,
   updateProgramAdmin,
-  deleteProgramAdmin
+  deleteProgramAdmin,
+  getProgramLevelsAdmin,
+  createProgramLevelAdmin,
+  updateProgramLevelAdmin,
+  deleteProgramLevelAdmin
 };
 

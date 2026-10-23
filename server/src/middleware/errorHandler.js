@@ -35,6 +35,13 @@ function errorHandler(err, req, res, next) {
     error: err.message || 'An unexpected internal server error occurred.'
   };
 
+  if (err.code) {
+    response.code = err.code;
+  }
+  if (err.populatedLevels) {
+    response.populatedLevels = err.populatedLevels;
+  }
+
   // Only expose stack trace in non-production
   if (config.nodeEnv !== 'production') {
     response.stack = err.stack;

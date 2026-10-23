@@ -82,16 +82,20 @@ async function getLevelById(req, res, next) {
     const rows = await db.query(`
       SELECT
         lvl.*,
+        p.name AS program_name,
+        p.slug AS program_slug,
+        p.icon AS program_icon,
         l.name AS language_name,
         l.slug AS language_slug,
         COUNT(DISTINCT CASE WHEN q.status = 'ACTIVE' THEN q.id END) AS total_questions,
         COUNT(DISTINCT CASE WHEN q.status = 'ACTIVE' AND usq.id IS NOT NULL THEN q.id END) AS solved_questions
       FROM levels lvl
-      JOIN languages l ON lvl.language_id = l.id
+      LEFT JOIN programs p ON lvl.program_id = p.id
+      LEFT JOIN languages l ON lvl.language_id = l.id
       LEFT JOIN questions q ON lvl.id = q.level_id AND q.status = 'ACTIVE'
       LEFT JOIN user_solved_questions usq ON q.id = usq.question_id AND usq.user_id = ?
       WHERE lvl.id = ?
-      GROUP BY lvl.id, l.name, l.slug
+      GROUP BY lvl.id, p.name, p.slug, p.icon, l.name, l.slug
     `, [userId, levelId]);
 
     if (!rows || rows.length === 0) {

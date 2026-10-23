@@ -30,6 +30,7 @@ const COMPILER_CONFIG = {
 export function UploadQuestionPage() {
   const navigate = useNavigate();
 
+  const [programs, setPrograms] = useState([]);
   const [languages, setLanguages] = useState([]);
   const [levels, setLevels] = useState([]);
   const [activeTab, setActiveTab] = useState('edit'); // 'edit' or 'preview'
@@ -44,6 +45,7 @@ export function UploadQuestionPage() {
 
   // Form fields
   const [title, setTitle] = useState('');
+  const [programId, setProgramId] = useState('');
   const [languageId, setLanguageId] = useState('');
   const [levelId, setLevelId] = useState('');
   const [statement, setStatement] = useState('');
@@ -63,26 +65,51 @@ export function UploadQuestionPage() {
     { test_input: '', expected_output: '', is_hidden: true }
   ]);
 
-  // Load languages
+  // Load programs & languages on mount
   useEffect(() => {
-    async function fetchLangs() {
+    async function fetchMeta() {
       try {
-        const res = await api.get('/languages');
-        const langs = res.data.languages || [];
+        const [progRes, langRes] = await Promise.all([
+          api.get('/programs'),
+          api.get('/languages')
+        ]);
+        const progs = progRes.data.programs || [];
+        const langs = langRes.data.languages || [];
+        setPrograms(progs);
         setLanguages(langs);
+        if (progs.length > 0) {
+          setProgramId(progs[0].id);
+        }
         if (langs.length > 0) {
           setLanguageId(langs[0].id);
         }
       } catch (err) {
-        console.error('Failed to load languages:', err);
+        console.error('Failed to load metadata:', err);
       }
     }
-    fetchLangs();
+    fetchMeta();
   }, []);
 
-  // Load levels whenever languageId changes
+  // Load levels whenever programId or languageId changes
   useEffect(() => {
     async function fetchLevels() {
+      if (programId) {
+        const targetProg = programs.find(p => p.id === parseInt(programId, 10));
+        if (targetProg) {
+          try {
+            const res = await api.get(`/programs/${targetProg.slug}`);
+            const lvls = res.data.levels || [];
+            setLevels(lvls);
+            if (lvls.length > 0) {
+              setLevelId(lvls[0].id);
+            }
+            return;
+          } catch (e) {
+            // fallback
+          }
+        }
+      }
+
       if (!languageId) return;
       try {
         const res = await api.get(`/languages/${languageId}/levels`);
@@ -96,7 +123,7 @@ export function UploadQuestionPage() {
       }
     }
     fetchLevels();
-  }, [languageId]);
+  }, [programId, languageId, programs]);
 
   // Selected language and level objects
   const selectedLangObj = languages.find(l => l.id === parseInt(languageId, 10));
@@ -251,6 +278,7 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
     try {
       const payload = {
         title,
+        program_id: programId ? parseInt(programId, 10) : undefined,
         language_id: parseInt(languageId, 10),
         level_id: parseInt(levelId, 10),
         compiler_id: currentCompiler.judge0Id,
@@ -533,7 +561,22 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
                 <span className="text-xs text-[#64748B]">Step 1 of 4</span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
+                    Program Track
+                  </label>
+                  <select
+                    value={programId}
+                    onChange={(e) => setProgramId(e.target.value)}
+                    className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-[#172554] text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                  >
+                    {programs.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
                     Programming Language *
@@ -560,7 +603,7 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
                   >
                     {levels.map((lvl) => (
                       <option key={lvl.id} value={lvl.id}>
-                        Level {lvl.levelNumber}: {lvl.title}
+                        Level {lvl.levelNumber || lvl.level_number}: {lvl.title}
                       </option>
                     ))}
                   </select>

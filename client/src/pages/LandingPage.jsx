@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 import {
   Code2,
   Terminal,
@@ -9,18 +10,53 @@ import {
   ArrowRight,
   Flame,
   Users,
-  CheckCircle2
+  CheckCircle2,
+  Cpu,
+  FileCode,
+  GitBranch,
+  Database,
+  Award,
+  BookOpen
 } from 'lucide-react';
+
+const ICON_MAP = {
+  Cpu,
+  Layers,
+  Terminal,
+  Code: FileCode,
+  FileCode,
+  GitBranch,
+  Database,
+  Award,
+  Flame,
+  BookOpen
+};
 
 export function LandingPage() {
   const { isAuthenticated } = useAuth();
+  const [programs, setPrograms] = useState([]);
 
-  const languages = [
-    { name: 'C', desc: 'Master memory management, pointers, and systems fundamentals.' },
-    { name: 'C++', desc: 'Modern object-oriented constructs, STL templates, and performance.' },
-    { name: 'Java', desc: 'Object architecture, clean patterns, and enterprise computing.' },
-    { name: 'Python', desc: 'Elegant syntax, concise algorithms, and powerful data structures.' }
-  ];
+  useEffect(() => {
+    async function loadPrograms() {
+      try {
+        const res = await api.get('/programs');
+        if (res.data?.programs && res.data.programs.length > 0) {
+          setPrograms(res.data.programs);
+          return;
+        }
+      } catch (e) {
+        // Safe fallback
+      }
+
+      setPrograms([
+        { id: 1, name: 'C Programming', slug: 'c-programming', icon: 'Cpu', levelCount: 6, questionCount: 30, description: 'Master memory management, pointers, and systems fundamentals.' },
+        { id: 2, name: 'C++ Programming', slug: 'cpp-programming', icon: 'Layers', levelCount: 6, questionCount: 32, description: 'Modern object-oriented constructs, STL templates, and performance.' },
+        { id: 3, name: 'Java Programming', slug: 'java-programming', icon: 'Terminal', levelCount: 6, questionCount: 32, description: 'Object architecture, clean patterns, and enterprise computing.' },
+        { id: 4, name: 'Python Programming', slug: 'python-programming', icon: 'Code', levelCount: 6, questionCount: 33, description: 'Elegant syntax, concise algorithms, and powerful data structures.' }
+      ]);
+    }
+    loadPrograms();
+  }, []);
 
   return (
     <div className="flex flex-col">
@@ -40,8 +76,8 @@ export function LandingPage() {
           </h1>
 
           <p className="text-lg sm:text-xl text-[#64748B] max-w-3xl mx-auto mb-10 leading-relaxed">
-            Choose your language, start at any curriculum level, execute code in isolated sandboxes,
-            and contribute real challenges to an active community of learners.
+            Choose your learning track, advance through independent ordered levels, execute code in isolated Judge0 sandboxes,
+            and build practical algorithmic skills.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -57,85 +93,93 @@ export function LandingPage() {
               className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-white hover:bg-[#F5F9FF] text-[#1E3A8A] border border-[#DBEAFE] font-semibold text-base transition-colors flex items-center justify-center gap-2 shadow-xs"
             >
               <Terminal className="w-5 h-5 text-[#2563EB]" />
-              Explore Languages
+              Explore All Tracks
             </Link>
           </div>
         </div>
       </section>
 
-      {/* Languages Grid */}
+      {/* Dynamic Program Tracks Grid */}
       <section className="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full">
         <div className="text-center mb-14">
           <h2 className="text-2xl sm:text-3xl font-bold text-[#1E3A8A] mb-3">
-            Supported Programming Curricula
+            Supported Learning Tracks
           </h2>
           <p className="text-[#64748B] max-w-xl mx-auto text-sm">
-            Each track is structured into progressive tiers, from fundamental I/O through conditions, loops, and advanced structures.
+            Each track is structured into progressive tiers, from fundamental I/O through conditions, loops, and advanced algorithmic structures.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {languages.map((lang) => (
-            <div
-              key={lang.name}
-              className="p-6 rounded-2xl bg-white border border-[#DBEAFE] hover:border-[#2563EB] transition-all hover:-translate-y-1 group shadow-sm hover:shadow-md flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-2xl font-black text-[#1E3A8A]">{lang.name}</span>
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-[#DBEAFE] text-[#1E3A8A] font-semibold">
-                    Curriculum
-                  </span>
-                </div>
-                <p className="text-sm text-[#64748B] mb-6 leading-relaxed">{lang.desc}</p>
-              </div>
-
-              <Link
-                to="/languages"
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#2563EB] group-hover:text-[#1D4ED8]"
+          {programs.map((prog) => {
+            const IconComp = ICON_MAP[prog.icon] || FileCode;
+            return (
+              <div
+                key={prog.id}
+                className="p-6 rounded-2xl bg-white border border-[#DBEAFE] hover:border-[#2563EB] transition-all hover:-translate-y-1 group shadow-sm hover:shadow-md flex flex-col justify-between"
               >
-                View Levels <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
-          ))}
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-2.5 rounded-xl bg-[#F5F9FF] border border-[#DBEAFE] text-[#2563EB] group-hover:bg-[#2563EB] group-hover:text-white transition-colors">
+                      <IconComp className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-[#DBEAFE] text-[#1E3A8A] font-semibold">
+                      {prog.levelCount || 5} Levels
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-[#1E3A8A] mb-2">{prog.name}</h3>
+                  <p className="text-xs text-[#64748B] mb-6 leading-relaxed line-clamp-3">
+                    {prog.description || 'Structured challenges and algorithmic exercises designed for step-by-step progress.'}
+                  </p>
+                </div>
+
+                <Link
+                  to={`/programs/${prog.slug}/levels`}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#2563EB] group-hover:text-[#1D4ED8] transition-colors"
+                >
+                  Explore Curriculum <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                </Link>
+              </div>
+            );
+          })}
         </div>
       </section>
 
-      {/* Highlights */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-[#F5F9FF] border-t border-b border-[#DBEAFE]">
+      {/* Features Strip */}
+      <section className="bg-white border-t border-[#DBEAFE] py-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="flex items-start gap-4 p-5 bg-white rounded-2xl border border-[#DBEAFE] shadow-xs">
-            <div className="p-3 bg-blue-50 text-[#2563EB] rounded-xl border border-[#DBEAFE]">
+          <div className="flex items-start gap-4 p-4 rounded-xl">
+            <div className="p-3 rounded-xl bg-[#F5F9FF] border border-[#DBEAFE] text-[#2563EB] shrink-0">
               <Layers className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-[#1E3A8A] mb-1">Open Progression</h3>
-              <p className="text-sm text-[#64748B] leading-relaxed">
-                Learn flexibly at your own pace. You can jump directly to any level without locked prerequisites.
+              <h3 className="text-base font-bold text-[#1E3A8A] mb-1">Independent Ordered Levels</h3>
+              <p className="text-xs text-[#64748B] leading-relaxed">
+                Self-contained progression curves from elementary basics to advanced algorithms for every curriculum track.
               </p>
             </div>
           </div>
 
-          <div className="flex items-start gap-4 p-5 bg-white rounded-2xl border border-[#DBEAFE] shadow-xs">
-            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-200">
+          <div className="flex items-start gap-4 p-4 rounded-xl">
+            <div className="p-3 rounded-xl bg-[#F5F9FF] border border-[#DBEAFE] text-[#2563EB] shrink-0">
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-[#1E3A8A] mb-1">Self-Governing Quality</h3>
-              <p className="text-sm text-[#64748B] leading-relaxed">
-                Community voting and a 4-report threshold ensure inaccurate questions are instantly replaced and reviewed.
+              <h3 className="text-base font-bold text-[#1E3A8A] mb-1">Judge0 Sandboxed Execution</h3>
+              <p className="text-xs text-[#64748B] leading-relaxed">
+                Run visible samples and test hidden edge cases with real runtime compiler versions (GCC, OpenJDK, Python).
               </p>
             </div>
           </div>
 
-          <div className="flex items-start gap-4 p-5 bg-white rounded-2xl border border-[#DBEAFE] shadow-xs">
-            <div className="p-3 bg-purple-50 text-purple-600 rounded-xl border border-purple-200">
+          <div className="flex items-start gap-4 p-4 rounded-xl">
+            <div className="p-3 rounded-xl bg-[#F5F9FF] border border-[#DBEAFE] text-[#2563EB] shrink-0">
               <Users className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-[#1E3A8A] mb-1">Community Uploads</h3>
-              <p className="text-sm text-[#64748B] leading-relaxed">
-                Contribute questions directly with test cases, starter code, and explanations to enrich the platform.
+              <h3 className="text-base font-bold text-[#1E3A8A] mb-1">Community Driven Practice</h3>
+              <p className="text-xs text-[#64748B] leading-relaxed">
+                Contribute questions, report flawed problem statements with categories, and vote on useful coding challenges.
               </p>
             </div>
           </div>

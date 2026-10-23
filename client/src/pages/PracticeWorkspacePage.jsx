@@ -31,6 +31,7 @@ export function PracticeWorkspacePage() {
 
   const [question, setQuestion] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [allowedCompilers, setAllowedCompilers] = useState([]);
   const [selectedLanguage, setSelectedLanguage] = useState('c');
   const [code, setCode] = useState('');
 
@@ -88,7 +89,18 @@ export function PracticeWorkspacePage() {
         const res = await api.get(`/questions/${questionId}`);
         const q = res.data.question;
         setQuestion(q);
-        setSelectedLanguage(q.languageSlug || 'c');
+        const compilers = q.allowedCompilers || [];
+        setAllowedCompilers(compilers);
+        if (compilers.length > 0) {
+          const hasCurrent = compilers.some(c => c.languageSlug === (q.languageSlug || 'c'));
+          if (hasCurrent) {
+            setSelectedLanguage(q.languageSlug || 'c');
+          } else {
+            setSelectedLanguage(compilers[0].languageSlug);
+          }
+        } else {
+          setSelectedLanguage(q.languageSlug || 'c');
+        }
         setUsefulVotes(q.usefulVotes || 0);
         setHasVoted(q.userHasVoted || false);
         // Ensure editor begins completely empty with no preloaded or starter code
@@ -219,9 +231,11 @@ export function PracticeWorkspacePage() {
     setSubmitResult(null);
 
     try {
+      const currentCompiler = allowedCompilers.find(c => c.languageSlug === selectedLanguage);
       const res = await api.post('/submissions/run', {
         questionId: question.id,
         language: selectedLanguage,
+        compilerId: currentCompiler?.compilerId,
         sourceCode: code
       });
       setRunResult(res.data);
@@ -259,9 +273,11 @@ export function PracticeWorkspacePage() {
     setSubmitResult(null);
 
     try {
+      const currentCompiler = allowedCompilers.find(c => c.languageSlug === selectedLanguage);
       const res = await api.post('/submissions/submit', {
         questionId: question.id,
         language: selectedLanguage,
+        compilerId: currentCompiler?.compilerId,
         sourceCode: code
       });
       setSubmitResult(res.data);
@@ -550,17 +566,27 @@ export function PracticeWorkspacePage() {
           {/* Editor Header Toolbar */}
           <div className="h-10 bg-[#F5F9FF] border-b border-[#DBEAFE] px-4 flex items-center justify-between shrink-0 text-xs">
             <div className="flex items-center gap-2">
-              <span className="text-[#64748B] font-medium">Language:</span>
+              <span className="text-[#64748B] font-medium">Compiler:</span>
               <select
                 value={selectedLanguage}
                 onChange={(e) => handleLanguageChange(e.target.value)}
                 className="font-bold text-[#2563EB] bg-white border border-[#DBEAFE] rounded-lg px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-                title="Select language (clears editor on switch)"
+                title="Select compiler runtime (clears editor on switch)"
               >
-                <option value="c">C (GCC 9.2.0)</option>
-                <option value="cpp">C++ (GCC 9.2.0)</option>
-                <option value="java">Java (OpenJDK 13)</option>
-                <option value="python">Python (3.8.1)</option>
+                {allowedCompilers && allowedCompilers.length > 0 ? (
+                  allowedCompilers.map((c) => (
+                    <option key={c.compilerId || c.languageSlug} value={c.languageSlug}>
+                      {c.compilerName || c.languageName}
+                    </option>
+                  ))
+                ) : (
+                  <>
+                    <option value="c">C (GCC 9.2.0)</option>
+                    <option value="cpp">C++ (GCC 9.2.0)</option>
+                    <option value="java">Java (OpenJDK 13)</option>
+                    <option value="python">Python (3.8.1)</option>
+                  </>
+                )}
               </select>
             </div>
 

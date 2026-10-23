@@ -293,13 +293,14 @@ async function deleteQuestion(req, res, next) {
 }
 
 /**
- * List all questions with filtering by search, language, level, and status
+ * List all questions with filtering by search, program, language, level, and status
  */
 async function getQuestions(req, res, next) {
   try {
-    const { search, languageId, levelId, status, page, limit, sort } = req.query;
+    const { search, programId, languageId, levelId, status, page, limit, sort } = req.query;
     const result = await adminService.getQuestionsAdmin({
       search,
+      programId,
       languageId,
       levelId,
       status,
@@ -419,6 +420,53 @@ async function deleteProgram(req, res, next) {
   }
 }
 
+/**
+ * Program Level Sub-resources
+ */
+async function getProgramLevels(req, res, next) {
+  try {
+    const { programId } = req.params;
+    const levels = await adminService.getProgramLevelsAdmin(programId);
+    res.json({
+      success: true,
+      levels
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function createProgramLevel(req, res, next) {
+  try {
+    const { programId } = req.params;
+    const result = await adminService.createProgramLevelAdmin(programId, req.body);
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function updateProgramLevel(req, res, next) {
+  try {
+    const { programId, levelId } = req.params;
+    const result = await adminService.updateProgramLevelAdmin(programId, levelId, req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function deleteProgramLevel(req, res, next) {
+  try {
+    const { programId, levelId } = req.params;
+    const force = req.query.force === 'true' || req.body.force === true;
+    const result = await adminService.deleteProgramLevelAdmin(programId, levelId, { force });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getOverview,
   getReportedQuestions,
@@ -442,6 +490,10 @@ module.exports = {
   getProgramById,
   createProgram,
   updateProgram,
-  deleteProgram
+  deleteProgram,
+  getProgramLevels,
+  createProgramLevel,
+  updateProgramLevel,
+  deleteProgramLevel
 };
 

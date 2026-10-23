@@ -29,8 +29,10 @@ export function QuestionEditModal({
   const [success, setSuccess] = useState('');
 
   // Dropdown options
+  const [programs, setPrograms] = useState([]);
   const [languages, setLanguages] = useState([]);
   const [levels, setLevels] = useState([]);
+  const [allowedCompilers, setAllowedCompilers] = useState([]);
 
   // Form states
   const [title, setTitle] = useState('');
@@ -39,6 +41,7 @@ export function QuestionEditModal({
   const [outputFormat, setOutputFormat] = useState('');
   const [constraintsText, setConstraintsText] = useState('');
   const [explanation, setExplanation] = useState('');
+  const [programId, setProgramId] = useState('');
   const [languageId, setLanguageId] = useState('');
   const [levelId, setLevelId] = useState('');
   const [currentStatus, setCurrentStatus] = useState('ACTIVE');
@@ -54,18 +57,22 @@ export function QuestionEditModal({
   ]);
   const [starterCode, setStarterCode] = useState('');
 
-  // Load languages on mount
+  // Load programs & languages on mount
   useEffect(() => {
     if (!isOpen) return;
-    async function loadLanguages() {
+    async function loadMeta() {
       try {
-        const res = await api.get('/languages');
-        setLanguages(res.data.languages || []);
+        const [langRes, progRes] = await Promise.all([
+          api.get('/languages'),
+          api.get('/admin/programs')
+        ]);
+        setLanguages(langRes.data.languages || []);
+        setPrograms(progRes.data.programs || []);
       } catch (err) {
-        console.error('Failed to load languages for question edit:', err);
+        console.error('Failed to load metadata for question edit:', err);
       }
     }
-    loadLanguages();
+    loadMeta();
   }, [isOpen]);
 
   // Load question details whenever modal opens or questionId changes
@@ -85,7 +92,8 @@ export function QuestionEditModal({
         setOutputFormat(q.output_format || '');
         setConstraintsText(q.constraints_text || '');
         setExplanation(q.explanation || '');
-        setLanguageId(q.language_id);
+        setProgramId(q.program_id || '');
+        setLanguageId(q.language_id || '');
         setLevelId(q.level_id);
         setCurrentStatus(q.status);
         setStatusAction('PRESERVE');
@@ -131,24 +139,46 @@ export function QuestionEditModal({
     loadQuestion();
   }, [isOpen, questionId]);
 
-  // Fetch levels whenever languageId changes
+  // Fetch program-specific levels whenever programId changes
   useEffect(() => {
-    if (!languageId) return;
-    async function loadLevels() {
+    if (!programId) {
+      // Fallback to language-based levels if program is not selected
+      if (!languageId) return;
+      async function loadLangLevels() {
+        try {
+          const res = await api.get(`/languages/${languageId}/levels`);
+          const lvls = res.data.levels || [];
+          setLevels(lvls);
+          if (lvls.length > 0 && !lvls.some(l => l.id === parseInt(levelId, 10))) {
+            setLevelId(lvls[0].id);
+          }
+        } catch (err) {
+          console.error('Failed to load levels:', err);
+        }
+      }
+      loadLangLevels();
+      return;
+    }
+
+    async function loadProgramLevels() {
       try {
-        const res = await api.get(`/languages/${languageId}/levels`);
+        const res = await api.get(`/admin/programs/${programId}/levels`);
         const lvls = res.data.levels || [];
         setLevels(lvls);
-        // If current levelId does not belong to new language, pick first level
         if (lvls.length > 0 && !lvls.some(l => l.id === parseInt(levelId, 10))) {
           setLevelId(lvls[0].id);
         }
+
+        const currentProg = programs.find(p => p.id === parseInt(programId, 10));
+        if (currentProg && currentProg.compilers) {
+          setAllowedCompilers(currentProg.compilers);
+        }
       } catch (err) {
-        console.error('Failed to load levels for language:', err);
+        console.error('Failed to load program levels:', err);
       }
     }
-    loadLevels();
-  }, [languageId]);
+    loadProgramLevels();
+  }, [programId, languageId, programs]);
 
   if (!isOpen) return null;
 
@@ -197,8 +227,8 @@ export function QuestionEditModal({
       setActiveTab('content');
       return;
     }
-    if (!languageId || !levelId) {
-      setError('Please select both a valid language and level.');
+    if (!levelId) {
+      setError('Please select a valid level.');
       setActiveTab('content');
       return;
     }
@@ -215,7 +245,8 @@ export function QuestionEditModal({
         output_format: outputFormat.trim(),
         constraints_text: constraintsText.trim(),
         explanation: explanation.trim(),
-        language_id: parseInt(languageId, 10),
+        program_id: programId ? parseInt(programId, 10) : null,
+        language_id: languageId ? parseInt(languageId, 10) : null,
         level_id: parseInt(levelId, 10),
         samples,
         test_cases: testCases,
@@ -337,21 +368,21 @@ export function QuestionEditModal({
               {/* TAB 1: Statement & Metadata */}
               {activeTab === 'content' && (
                 <div className="space-y-4">
-                  {/* Language and Level Selectors */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Program, Language, and Level Selectors */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1.5">
-                        Programming Language *
+                        Program Track
                       </label>
                       <select
-                        value={languageId}
-                        onChange={(e) => setLanguageId(e.target.value)}
+                        value={programId}
+                        onChange={(e) => setProgramId(e.target.value)}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-semibold focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                        required
                       >
-                        {languages.map(lang => (
-                          <option key={lang.id} value={lang.id}>
-                            {lang.name} ({lang.slug})
+                        <option value="">(Standalone / No Program)</option>
+                        {programs.map(prog => (
+                          <option key={prog.id} value={prog.id}>
+                            {prog.name}
                           </option>
                         ))}
                       </select>
@@ -370,6 +401,24 @@ export function QuestionEditModal({
                         {levels.map(lvl => (
                           <option key={lvl.id} value={lvl.id}>
                             Level {lvl.level_number || lvl.levelNumber} &bull; {lvl.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1.5">
+                        Compiler / Language
+                      </label>
+                      <select
+                        value={languageId}
+                        onChange={(e) => setLanguageId(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-semibold focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                      >
+                        <option value="">Any Supported Program Compiler</option>
+                        {languages.map(lang => (
+                          <option key={lang.id} value={lang.id}>
+                            {lang.name} ({lang.slug})
                           </option>
                         ))}
                       </select>

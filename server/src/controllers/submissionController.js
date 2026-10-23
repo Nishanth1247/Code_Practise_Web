@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const codeExecutionService = require('../services/codeExecutionService');
+const { LANGUAGE_CONFIG, getCompilerConfig } = require('../config/judge0');
 
 /**
  * RUN CODE: Test against visible sample cases only.
@@ -25,7 +26,7 @@ async function runCode(req, res, next) {
 
     // Verify question exists and is ACTIVE
     const questionRows = await db.query(
-      'SELECT id, status FROM questions WHERE id = ?',
+      'SELECT id, status, program_id, language_id FROM questions WHERE id = ?',
       [questionId]
     );
 
@@ -34,6 +35,56 @@ async function runCode(req, res, next) {
         success: false,
         error: 'This question is currently unavailable for practice or test runs.'
       });
+    }
+
+    const question = questionRows[0];
+    const langSlug = String(language).toLowerCase().trim();
+    const langConfig = LANGUAGE_CONFIG[langSlug];
+
+    if (!langConfig) {
+      return res.status(400).json({
+        success: false,
+        error: `Unsupported programming language or compiler runtime: '${language}'.`
+      });
+    }
+
+    // Verify compiler ID if provided by client against expected real Judge0 runtime ID
+    if (req.body.compilerId !== undefined && req.body.compilerId !== null) {
+      const providedCompilerId = parseInt(req.body.compilerId, 10);
+      if (providedCompilerId !== langConfig.judge0Id) {
+        return res.status(400).json({
+          success: false,
+          error: `Compiler mismatch: The selected language requires compiler '${langConfig.displayName}' (Judge0 ID ${langConfig.judge0Id}). Received ID ${providedCompilerId}.`
+        });
+      }
+    }
+
+    // Enforce Program Allowed Compilers
+    if (question.program_id) {
+      const allowedLangs = await db.query(`
+        SELECT pl.compiler_id, l.slug
+        FROM program_languages pl
+        JOIN languages l ON pl.language_id = l.id
+        WHERE pl.program_id = ? AND LOWER(l.slug) = LOWER(?)
+      `, [question.program_id, langSlug]);
+
+      if (!allowedLangs || allowedLangs.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Compiler '${langConfig.displayName}' is not permitted for questions in this program track.`
+        });
+      }
+    }
+
+    // Enforce Per-Question Language Restriction if configured
+    if (question.language_id) {
+      const [qLang] = await db.query('SELECT slug FROM languages WHERE id = ?', [question.language_id]);
+      if (qLang && qLang.slug.toLowerCase() !== langSlug) {
+        return res.status(400).json({
+          success: false,
+          error: `This question only accepts solutions written in ${qLang.slug.toUpperCase()}.`
+        });
+      }
     }
 
     // Fetch question and sample cases
@@ -101,7 +152,7 @@ async function submitSolution(req, res, next) {
 
     // Verify question exists and is ACTIVE
     const questionRows = await db.query(
-      'SELECT id, status FROM questions WHERE id = ?',
+      'SELECT id, status, program_id, language_id FROM questions WHERE id = ?',
       [questionId]
     );
 
@@ -110,6 +161,56 @@ async function submitSolution(req, res, next) {
         success: false,
         error: 'This question is currently unavailable for submissions.'
       });
+    }
+
+    const question = questionRows[0];
+    const langSlug = String(language).toLowerCase().trim();
+    const langConfig = LANGUAGE_CONFIG[langSlug];
+
+    if (!langConfig) {
+      return res.status(400).json({
+        success: false,
+        error: `Unsupported programming language or compiler runtime: '${language}'.`
+      });
+    }
+
+    // Verify compiler ID if provided by client against expected real Judge0 runtime ID
+    if (req.body.compilerId !== undefined && req.body.compilerId !== null) {
+      const providedCompilerId = parseInt(req.body.compilerId, 10);
+      if (providedCompilerId !== langConfig.judge0Id) {
+        return res.status(400).json({
+          success: false,
+          error: `Compiler mismatch: The selected language requires compiler '${langConfig.displayName}' (Judge0 ID ${langConfig.judge0Id}). Received ID ${providedCompilerId}.`
+        });
+      }
+    }
+
+    // Enforce Program Allowed Compilers
+    if (question.program_id) {
+      const allowedLangs = await db.query(`
+        SELECT pl.compiler_id, l.slug
+        FROM program_languages pl
+        JOIN languages l ON pl.language_id = l.id
+        WHERE pl.program_id = ? AND LOWER(l.slug) = LOWER(?)
+      `, [question.program_id, langSlug]);
+
+      if (!allowedLangs || allowedLangs.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Compiler '${langConfig.displayName}' is not permitted for questions in this program track.`
+        });
+      }
+    }
+
+    // Enforce Per-Question Language Restriction if configured
+    if (question.language_id) {
+      const [qLang] = await db.query('SELECT slug FROM languages WHERE id = ?', [question.language_id]);
+      if (qLang && qLang.slug.toLowerCase() !== langSlug) {
+        return res.status(400).json({
+          success: false,
+          error: `This question only accepts solutions written in ${qLang.slug.toUpperCase()}.`
+        });
+      }
     }
 
     // Fetch hidden and public test cases from question_test_cases

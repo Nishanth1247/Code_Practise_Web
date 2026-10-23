@@ -40,6 +40,7 @@ export function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/languages" element={<LanguageSelectPage />} />
         <Route path="/languages/:languageSlug/levels" element={<LevelOverviewPage />} />
+        <Route path="/programs/:programSlug/levels" element={<LevelOverviewPage />} />
         <Route path="/levels/:levelId/questions" element={<QuestionListPage />} />
         <Route path="/practice/:questionId" element={<PracticeWorkspacePage />} />
 

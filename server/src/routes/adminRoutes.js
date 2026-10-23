@@ -25,6 +25,13 @@ router.patch('/programs/:id', adminController.updateProgram);
 router.put('/programs/:id', adminController.updateProgram);
 router.delete('/programs/:id', adminController.deleteProgram);
 
+// Program-specific Level Management routes
+router.get('/programs/:programId/levels', adminController.getProgramLevels);
+router.post('/programs/:programId/levels', adminController.createProgramLevel);
+router.patch('/programs/:programId/levels/:levelId', adminController.updateProgramLevel);
+router.put('/programs/:programId/levels/:levelId', adminController.updateProgramLevel);
+router.delete('/programs/:programId/levels/:levelId', adminController.deleteProgramLevel);
+
 // User Management routes
 router.get('/users', adminController.getUsers);
 router.get('/users/:id', adminController.getUserById);
