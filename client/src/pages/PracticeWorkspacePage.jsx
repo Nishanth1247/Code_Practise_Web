@@ -375,7 +375,7 @@ export function PracticeWorkspacePage() {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[#F5F9FF] overflow-hidden min-h-[calc(100vh-4rem)]">
+    <div className="flex-1 flex flex-col bg-[#F5F9FF] overflow-hidden h-[calc(100vh-3.5rem)] md:h-screen">
       {/* Top Workspace Bar */}
       <div className="h-13 border-b border-[#DBEAFE] bg-white px-4 flex items-center justify-between shrink-0 text-xs shadow-xs">
         <div className="flex items-center gap-3">

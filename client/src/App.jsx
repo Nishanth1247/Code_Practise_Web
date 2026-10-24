@@ -1,5 +1,6 @@
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
+import { StandaloneLayout } from './layouts/StandaloneLayout';
 import { MainLayout } from './layouts/MainLayout';
 import { AdminLayout } from './layouts/AdminLayout';
 import { ProtectedRoute, AdminRoute } from './layouts/ProtectedRoute';
@@ -21,6 +22,7 @@ import { MyQuestionsPage } from './pages/MyQuestionsPage';
 import { MySubmissionsPage } from './pages/MySubmissionsPage';
 import { UserProfilePage } from './pages/UserProfilePage';
 
+// Admin pages
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AdminQuestionsPage } from './pages/AdminQuestionsPage';
@@ -33,11 +35,16 @@ import { AdminAuditPage } from './pages/AdminAuditPage';
 export function App() {
   return (
     <Routes>
-      <Route element={<MainLayout />}>
-        {/* Public Routes */}
+      {/* Standalone Marketing & Authentication Pages */}
+      <Route element={<StandaloneLayout />}>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+      </Route>
+
+      {/* Main Application Pages with Responsive Left Sidebar */}
+      <Route element={<MainLayout />}>
+        {/* Practice Curriculum & Workspace Routes */}
         <Route path="/languages" element={<LanguageSelectPage />} />
         <Route path="/languages/:languageSlug/levels" element={<LevelOverviewPage />} />
         <Route path="/programs/:programSlug/levels" element={<LevelOverviewPage />} />
