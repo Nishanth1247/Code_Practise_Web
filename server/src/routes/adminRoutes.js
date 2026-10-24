@@ -35,12 +35,14 @@ router.delete('/courses/:id', adminController.deleteProgram);
 // Course / Program Level Management routes
 router.get('/programs/:programId/levels', adminController.getProgramLevels);
 router.post('/programs/:programId/levels', adminController.createProgramLevel);
+router.put('/programs/:programId/levels/reorder', adminController.reorderProgramLevels);
 router.patch('/programs/:programId/levels/:levelId', adminController.updateProgramLevel);
 router.put('/programs/:programId/levels/:levelId', adminController.updateProgramLevel);
 router.delete('/programs/:programId/levels/:levelId', adminController.deleteProgramLevel);
 
 router.get('/courses/:programId/levels', adminController.getProgramLevels);
 router.post('/courses/:programId/levels', adminController.createProgramLevel);
+router.put('/courses/:programId/levels/reorder', adminController.reorderProgramLevels);
 router.patch('/courses/:programId/levels/:levelId', adminController.updateProgramLevel);
 router.put('/courses/:programId/levels/:levelId', adminController.updateProgramLevel);
 router.delete('/courses/:programId/levels/:levelId', adminController.deleteProgramLevel);

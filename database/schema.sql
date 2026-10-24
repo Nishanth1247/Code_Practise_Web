@@ -74,6 +74,19 @@ CREATE TABLE IF NOT EXISTS `questions` (
   INDEX `idx_questions_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 4b. Question Languages Association (Multi-Language Question Support)
+CREATE TABLE IF NOT EXISTS `question_languages` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `question_id` INT NOT NULL,
+  `language_id` INT NOT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`question_id`) REFERENCES `questions` (`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`language_id`) REFERENCES `languages` (`id`) ON DELETE CASCADE,
+  UNIQUE KEY `unique_question_language` (`question_id`, `language_id`),
+  INDEX `idx_ql_question` (`question_id`),
+  INDEX `idx_ql_language` (`language_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 5. Question Starter Code Templates
 CREATE TABLE IF NOT EXISTS `starter_code_templates` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,

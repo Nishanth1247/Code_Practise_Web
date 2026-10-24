@@ -467,6 +467,17 @@ async function deleteProgramLevel(req, res, next) {
   }
 }
 
+async function reorderProgramLevels(req, res, next) {
+  try {
+    const { programId } = req.params;
+    const { levels } = req.body;
+    const result = await adminService.reorderProgramLevelsAdmin(programId, levels || req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getOverview,
   getReportedQuestions,
@@ -494,6 +505,7 @@ module.exports = {
   getProgramLevels,
   createProgramLevel,
   updateProgramLevel,
-  deleteProgramLevel
+  deleteProgramLevel,
+  reorderProgramLevels
 };
 

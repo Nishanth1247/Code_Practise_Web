@@ -46,7 +46,7 @@ export function UploadQuestionPage() {
   // Form fields
   const [title, setTitle] = useState('');
   const [programId, setProgramId] = useState('');
-  const [languageId, setLanguageId] = useState('');
+  const [selectedLanguageIds, setSelectedLanguageIds] = useState([]);
   const [levelId, setLevelId] = useState('');
   const [statement, setStatement] = useState('');
   const [inputFormat, setInputFormat] = useState('');
@@ -81,7 +81,7 @@ export function UploadQuestionPage() {
           setProgramId(progs[0].id);
         }
         if (langs.length > 0) {
-          setLanguageId(langs[0].id);
+          setSelectedLanguageIds([langs[0].id]);
         }
       } catch (err) {
         console.error('Failed to load metadata:', err);
@@ -98,17 +98,25 @@ export function UploadQuestionPage() {
     ? languages.filter(l => allowedCompilers.some(c => c.language_id === l.id || c.language_slug === l.slug))
     : languages;
 
-  // Auto-switch language if current language is not permitted in selected course
+  // Refresh and clear invalid previous language selections when selected course changes
   useEffect(() => {
-    if (!isTheoryCourse && availableLanguages.length > 0) {
-      const isCurrentValid = availableLanguages.some(l => l.id === parseInt(languageId, 10));
-      if (!isCurrentValid) {
-        setLanguageId(availableLanguages[0].id);
-      }
+    if (isTheoryCourse) {
+      setSelectedLanguageIds([]);
+      return;
     }
-  }, [programId, availableLanguages, isTheoryCourse, languageId]);
+    if (availableLanguages.length > 0) {
+      setSelectedLanguageIds(prev => {
+        const stillValid = prev.filter(id => availableLanguages.some(l => l.id === id));
+        if (stillValid.length > 0) {
+          return stillValid;
+        }
+        // Default to all allowed languages for this course so question is multi-language by default
+        return availableLanguages.map(l => l.id);
+      });
+    }
+  }, [programId, availableLanguages.length, isTheoryCourse]);
 
-  // Load levels whenever programId or languageId changes
+  // Load levels whenever programId changes
   useEffect(() => {
     async function fetchLevels() {
       if (programId) {
@@ -128,41 +136,64 @@ export function UploadQuestionPage() {
         }
       }
 
-      if (!languageId) return;
-      try {
-        const res = await api.get(`/languages/${languageId}/levels`);
-        const lvls = res.data.levels || [];
-        setLevels(lvls);
-        if (lvls.length > 0) {
-          setLevelId(lvls[0].id);
+      if (availableLanguages.length > 0 && selectedLanguageIds[0]) {
+        try {
+          const res = await api.get(`/languages/${selectedLanguageIds[0]}/levels`);
+          const lvls = res.data.levels || [];
+          setLevels(lvls);
+          if (lvls.length > 0) {
+            setLevelId(lvls[0].id);
+          }
+        } catch (err) {
+          console.error('Failed to load levels:', err);
         }
-      } catch (err) {
-        console.error('Failed to load levels:', err);
       }
     }
     fetchLevels();
-  }, [programId, languageId, programs]);
+  }, [programId, programs]);
 
-  // Selected language and level objects
-  const selectedLangObj = languages.find(l => l.id === parseInt(languageId, 10));
+  // Toggle language selection
+  const handleToggleLanguage = (langId) => {
+    setSelectedLanguageIds(prev => {
+      if (prev.includes(langId)) {
+        return prev.filter(id => id !== langId);
+      } else {
+        return [...prev, langId];
+      }
+    });
+  };
+
+  const handleSelectAllLanguages = () => {
+    setSelectedLanguageIds(availableLanguages.map(l => l.id));
+  };
+
+  const handleClearLanguages = () => {
+    setSelectedLanguageIds([]);
+  };
+
+  // Selected language objects and level object
+  const selectedLangObjs = languages.filter(l => selectedLanguageIds.includes(l.id));
   const selectedLvlObj = levels.find(l => l.id === parseInt(levelId, 10));
 
-  // Automatic Compiler Selection: mapped strictly from selected language slug
-  const currentCompiler = (selectedLangObj && COMPILER_CONFIG[selectedLangObj.slug?.toLowerCase()]) || {
+  // Primary compiler reference for preview
+  const primaryLang = selectedLangObjs[0];
+  const currentCompiler = (primaryLang && COMPILER_CONFIG[primaryLang.slug?.toLowerCase()]) || {
     name: 'GCC 9.2.0',
-    judge0Id: 50,
-    label: 'C (GCC 9.2.0)'
+    judge0Id: 54,
+    label: 'C++ (GCC 9.2.0)'
   };
 
   // Structured ChatGPT Prompt tailored to CodeCraft
-  const targetLanguageName = selectedLangObj ? selectedLangObj.name : '[LANGUAGE: C / C++ / Java / Python]';
+  const targetLanguageNames = selectedLangObjs.length > 0
+    ? selectedLangObjs.map(l => `${l.name} (${COMPILER_CONFIG[l.slug?.toLowerCase()]?.name || 'Standard'})`).join(', ')
+    : '[ALL ENABLED LANGUAGES]';
   const targetLevelLabel = selectedLvlObj
     ? `Level ${selectedLvlObj.levelNumber} (${selectedLvlObj.title})`
     : '[TARGET LEVEL: e.g. Level 1 - Basics]';
 
   const chatGptPrompt = `I want to create a high-quality coding practice question for CodeCraft, a level-based community coding practice platform.
 
-Target Language: ${targetLanguageName} (Compiler: ${currentCompiler.label})
+Target Languages: ${targetLanguageNames}
 Target Level: ${targetLevelLabel}
 Topic / Concept: [REPLACE WITH TOPIC: e.g. Array Manipulation, Two Pointers, String Parsing, Recursion, Dynamic Programming]
 
@@ -291,6 +322,12 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
     e.preventDefault();
     setError('');
     setSuccess('');
+
+    if (!isTheoryCourse && selectedLanguageIds.length === 0) {
+      setError('Please select at least one supported programming language for this coding question.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -298,7 +335,8 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
         title,
         course_id: programId ? parseInt(programId, 10) : undefined,
         program_id: programId ? parseInt(programId, 10) : undefined,
-        language_id: isTheoryCourse && !languageId ? null : parseInt(languageId, 10),
+        language_ids: isTheoryCourse ? [] : selectedLanguageIds,
+        language_id: isTheoryCourse ? null : (selectedLanguageIds[0] || null),
         level_id: parseInt(levelId, 10),
         compiler_id: isTheoryCourse ? null : currentCompiler.judge0Id,
         statement,
@@ -591,7 +629,7 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
                 <span className="text-xs text-[#64748B]">Step 1 of 4</span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
                     Practice Course *
@@ -605,22 +643,6 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
                       <option key={p.id} value={p.id}>
                         {p.name} {p.courseType === 'THEORY' || p.course_type === 'THEORY' ? '(Theory)' : ''}
                       </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
-                    Programming Language {isTheoryCourse ? '(Optional for Theory)' : '*'}
-                  </label>
-                  <select
-                    value={languageId}
-                    onChange={(e) => setLanguageId(e.target.value)}
-                    className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-[#172554] text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                  >
-                    {isTheoryCourse && <option value="">No language (Theory Problem)</option>}
-                    {availableLanguages.map((l) => (
-                      <option key={l.id} value={l.id}>{l.name}</option>
                     ))}
                   </select>
                 </div>
@@ -643,44 +665,134 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
                 </div>
               </div>
 
-              {/* Automatic Compiler Runtime Indicator (Read-only) */}
-              <div className="p-4 bg-[#F8FAFC] border border-[#CBD5E1] rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-50 text-[#2563EB] rounded-lg border border-blue-200 shrink-0">
-                    <Cpu className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-[#64748B] font-bold uppercase tracking-wider">
-                      {isTheoryCourse ? 'Conceptual Curriculum' : 'Automated Compiler Runtime'}
+              {/* Multi-Language Selection Control for Coding Courses */}
+              {isTheoryCourse ? (
+                <div className="p-4 bg-purple-50/70 border border-purple-200 rounded-xl flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-100 text-purple-700 rounded-lg shrink-0">
+                      <HelpCircle className="w-5 h-5" />
                     </div>
-                    {isTheoryCourse ? (
-                      <div className="text-sm font-bold text-purple-900">
-                        Theory Course — No Judge0 runtime or execution required
-                      </div>
-                    ) : (
-                      <div className="text-sm font-bold text-[#1E3A8A] flex items-center gap-2 flex-wrap">
-                        <span>{currentCompiler.label}</span>
-                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#DBEAFE] text-[#1E3A8A] font-mono font-semibold">
-                          Judge0 ID: {currentCompiler.judge0Id}
+                    <div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-purple-900 block">
+                        Theory Course
+                      </span>
+                      <p className="text-xs text-purple-800">
+                        Conceptual and algorithmic problems do not require programming languages or code execution.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 text-purple-700 bg-white px-2.5 py-1 rounded-full border border-purple-200 font-semibold text-xs shrink-0">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />
+                    Theory Reading
+                  </span>
+                </div>
+              ) : (
+                <div className="space-y-3 pt-2 border-t border-[#DBEAFE]">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-[#172554] uppercase">
+                        Supported Programming Languages *
+                      </label>
+                      <p className="text-[11px] text-[#64748B]">
+                        Select which languages learners can use to solve and submit this question. Restricted to course compilers.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleSelectAllLanguages}
+                        className="px-2.5 py-1 rounded-lg text-xs font-bold text-[#2563EB] hover:bg-[#DBEAFE] border border-[#DBEAFE] transition-colors"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearLanguages}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold text-[#64748B] hover:text-rose-600 hover:bg-rose-50 border border-slate-200 transition-colors"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Multi-select Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {availableLanguages.map((l) => {
+                      const isSelected = selectedLanguageIds.includes(l.id);
+                      const conf = COMPILER_CONFIG[l.slug?.toLowerCase()] || { name: 'Standard', judge0Id: '-' };
+                      return (
+                        <div
+                          key={l.id}
+                          onClick={() => handleToggleLanguage(l.id)}
+                          className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-start gap-3 select-none ${
+                            isSelected
+                              ? 'bg-[#F5F9FF] border-[#2563EB] shadow-xs ring-1 ring-[#2563EB]/30'
+                              : 'bg-white border-[#CBD5E1] hover:border-[#94A3B8] opacity-75 hover:opacity-100'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}} // Handled by container onClick
+                            className="mt-0.5 rounded text-[#2563EB] focus:ring-[#2563EB] pointer-events-none"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-bold text-[#1E3A8A] truncate">{l.name}</span>
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                                #{conf.judge0Id}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-[#2563EB] font-mono font-medium block">
+                              {conf.name}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Selected summary badge / chips */}
+                  <div className="p-3 bg-[#F8FAFC] border border-[#CBD5E1] rounded-xl flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-[#64748B] uppercase mr-1">
+                        Selected ({selectedLanguageIds.length}):
+                      </span>
+                      {selectedLangObjs.length === 0 ? (
+                        <span className="text-xs text-rose-500 font-semibold">
+                          No languages selected! Please select at least one language.
                         </span>
-                      </div>
-                    )}
+                      ) : (
+                        selectedLangObjs.map((l) => (
+                          <span
+                            key={l.id}
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#DBEAFE] text-[#1E3A8A]"
+                          >
+                            <span>{l.name}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleLanguage(l.id);
+                              }}
+                              className="hover:text-rose-600 ml-0.5"
+                              title={`Remove ${l.name}`}
+                            >
+                              &times;
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+
+                    <span className="text-xs text-emerald-700 font-medium inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      Multi-compiler ready
+                    </span>
                   </div>
                 </div>
-                <div className="text-xs text-[#64748B]">
-                  {isTheoryCourse ? (
-                    <span className="inline-flex items-center gap-1.5 text-purple-700 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-200 font-medium">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />
-                      Theory-only practice
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 font-medium">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      Auto-configured for {selectedLangObj?.name || 'language'}
-                    </span>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
 
           {/* Section 2: Problem Statement */}

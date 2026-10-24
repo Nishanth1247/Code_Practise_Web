@@ -45,12 +45,14 @@ describe('CodeCraft — Admin Practice Courses, Compilers, Levels & Contributed 
   afterAll(async () => {
     // Cleanup any test questions and courses created during test runs
     for (const qId of createdQuestionIds) {
+      await pool.query('DELETE FROM question_languages WHERE question_id = ?', [qId]).catch(() => {});
       await pool.query('DELETE FROM question_samples WHERE question_id = ?', [qId]).catch(() => {});
       await pool.query('DELETE FROM test_cases WHERE question_id = ?', [qId]).catch(() => {});
       await pool.query('DELETE FROM questions WHERE id = ?', [qId]).catch(() => {});
     }
 
     for (const cId of createdCourseIds) {
+      await pool.query('DELETE FROM question_languages WHERE question_id IN (SELECT id FROM questions WHERE program_id = ?)', [cId]).catch(() => {});
       await pool.query('DELETE FROM question_samples WHERE question_id IN (SELECT id FROM questions WHERE program_id = ?)', [cId]).catch(() => {});
       await pool.query('DELETE FROM test_cases WHERE question_id IN (SELECT id FROM questions WHERE program_id = ?)', [cId]).catch(() => {});
       await pool.query('DELETE FROM questions WHERE program_id = ?', [cId]).catch(() => {});
@@ -372,5 +374,157 @@ describe('CodeCraft — Admin Practice Courses, Compilers, Levels & Contributed 
       expect(confirmRes.status).toBe(200);
       expect(confirmRes.body.success).toBe(true);
     }
+  });
+
+  // Test 11: Contributor can create question with multiple allowed languages (C++ & Python)
+  test('11. Contributor can submit question supporting multiple languages (C++ & Python)', async () => {
+    const courseId = createdCourseIds[0];
+    const [levels] = await pool.query('SELECT id FROM levels WHERE program_id = ? AND level_number = 1', [courseId]);
+    const level1Id = levels[0].id;
+
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({
+        title: `Multi-Language Sliding Window Problem ${Date.now()}`,
+        statement: 'Find longest substring without repeating characters.',
+        course_id: courseId,
+        level_id: level1Id,
+        language_ids: [2, 4], // C++ (2) and Python (4)
+        input_format: 'String s',
+        output_format: 'Integer length',
+        constraints_text: '0 <= s.length <= 5 * 10^4',
+        samples: [{ sample_input: 'abcabcbb', expected_output: '3' }],
+        test_cases: [{ test_input: 'bbbbb', expected_output: '1', is_hidden: true }]
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    const newQId = res.body.questionId;
+    createdQuestionIds.push(newQId);
+
+    // Verify question_languages has both mappings
+    const [qlRows] = await pool.query('SELECT language_id FROM question_languages WHERE question_id = ? ORDER BY language_id ASC', [newQId]);
+    expect(qlRows.map(r => r.language_id)).toEqual([2, 4]);
+
+    // Verify GET /api/questions/:id returns languages and filtered allowedCompilers
+    const getRes = await request(app).get(`/api/questions/${newQId}`);
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.question.languageIds).toEqual([2, 4]);
+    const compilerSlugs = getRes.body.question.allowedCompilers.map(c => c.languageSlug);
+    expect(compilerSlugs).toContain('cpp');
+    expect(compilerSlugs).toContain('python');
+    expect(compilerSlugs).not.toContain('java'); // Java was not selected for this question
+  });
+
+  // Test 12: Question contribution with unpermitted language in language_ids is rejected
+  test('12. Question contribution is rejected if any selected language is not allowed in course', async () => {
+    const courseId = createdCourseIds[0];
+    const [levels] = await pool.query('SELECT id FROM levels WHERE program_id = ? AND level_number = 1', [courseId]);
+    const level1Id = levels[0].id;
+
+    // Language 1 (C) is NOT allowed in courseId (only 2, 3, 4 are allowed)
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({
+        title: `Invalid Multi-Language Question ${Date.now()}`,
+        statement: 'Attempts to use C along with C++',
+        course_id: courseId,
+        level_id: level1Id,
+        language_ids: [1, 2], // 1 is invalid
+        input_format: 'N/A',
+        output_format: 'N/A',
+        constraints_text: 'N/A',
+        samples: [{ sample_input: '1', expected_output: '1' }],
+        test_cases: [{ test_input: '1', expected_output: '1', is_hidden: true }]
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toMatch(/not permitted for this course/i);
+  });
+
+  // Test 13: Submissions check enforces question-level language restriction
+  test('13. Submissions enforce question-level language restrictions', async () => {
+    // The question created in Test 11 only permits C++ (2) and Python (4)
+    const multiLangQId = createdQuestionIds[createdQuestionIds.length - 1];
+
+    // Running with Java (which is in the course but NOT enabled for this question) should be rejected
+    const javaRes = await request(app)
+      .post('/api/submissions/run')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({
+        questionId: multiLangQId,
+        language: 'java',
+        sourceCode: 'public class Main { public static void main(String[] args) {} }'
+      });
+
+    expect(javaRes.status).toBe(400);
+    expect(javaRes.body.success).toBe(false);
+    expect(javaRes.body.error).toMatch(/not permitted/i);
+  });
+
+  // Test 14: Admin can manage course levels dynamically (list, add, edit, reorder, delete)
+  test('14. Admin can manage course levels dynamically (list, add, edit, reorder, delete)', async () => {
+    const courseId = createdCourseIds[0];
+
+    // 1. List levels for course
+    const listRes = await request(app)
+      .get(`/api/admin/courses/${courseId}/levels`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.success).toBe(true);
+    expect(Array.isArray(listRes.body.levels)).toBe(true);
+    const initialCount = listRes.body.levels.length;
+
+    // 2. Create new level
+    const addRes = await request(app)
+      .post(`/api/admin/courses/${courseId}/levels`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: 'Dynamic Test Level',
+        description: 'Testing dynamic level creation by admin',
+        enabled: true
+      });
+
+    expect(addRes.status).toBe(201);
+    expect(addRes.body.success).toBe(true);
+    const createdLevelId = addRes.body.level.id;
+    const createdLevelNum = addRes.body.level.levelNumber;
+
+    // 3. Edit the level
+    const editRes = await request(app)
+      .patch(`/api/admin/courses/${courseId}/levels/${createdLevelId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: 'Updated Dynamic Level Title',
+        description: 'Updated description'
+      });
+
+    expect(editRes.status).toBe(200);
+    expect(editRes.body.success).toBe(true);
+
+    // 4. Reorder levels
+    const reorderRes = await request(app)
+      .put(`/api/admin/courses/${courseId}/levels/reorder`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        levels: [
+          { id: createdLevelId, levelNumber: 10 }
+        ]
+      });
+
+    expect(reorderRes.status).toBe(200);
+    expect(reorderRes.body.success).toBe(true);
+
+    // 5. Delete the newly created empty level
+    const deleteRes = await request(app)
+      .delete(`/api/admin/courses/${courseId}/levels/${createdLevelId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.success).toBe(true);
   });
 });

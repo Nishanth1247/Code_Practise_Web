@@ -596,6 +596,44 @@ async function runIdempotentMigrations(connection, databaseName) {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // 9. Ensure `question_languages` table exists for multi-language questions
+  // ---------------------------------------------------------------------------
+  const [qlTables] = await connection.query(`
+    SELECT TABLE_NAME
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'question_languages'
+  `, [dbName]);
+
+  if (qlTables.length === 0) {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`question_languages\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`question_id\` INT NOT NULL,
+        \`language_id\` INT NOT NULL,
+        \`created_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (\`question_id\`) REFERENCES \`questions\` (\`id\`) ON DELETE CASCADE,
+        FOREIGN KEY (\`language_id\`) REFERENCES \`languages\` (\`id\`) ON DELETE CASCADE,
+        UNIQUE KEY \`unique_question_language\` (\`question_id\`, \`language_id\`),
+        INDEX \`idx_ql_question\` (\`question_id\`),
+        INDEX \`idx_ql_language\` (\`language_id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    changes.push("Created 'question_languages' table for multi-language question support.");
+  }
+
+  // Backfill: populate `question_languages` from existing single-language questions
+  const [backfillRes] = await connection.query(`
+    INSERT IGNORE INTO \`question_languages\` (\`question_id\`, \`language_id\`)
+    SELECT \`id\`, \`language_id\`
+    FROM \`questions\`
+    WHERE \`language_id\` IS NOT NULL;
+  `);
+
+  if (backfillRes && backfillRes.affectedRows > 0) {
+    changes.push(`Backfilled ${backfillRes.affectedRows} question-language relation(s) into 'question_languages'.`);
+  }
+
   return {
     success: true,
     database: dbName,

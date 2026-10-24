@@ -69,6 +69,9 @@ describe('Schema Migration & Soft-Delete Production Resilience Tests', () => {
   // 2. Authentication & Soft-Deleted Users
   // ---------------------------------------------------------------------------
   test('Authentication: Login rejects deleted users with 403 Forbidden', async () => {
+    // Cleanup any lingering user from previous failed runs
+    await db.getPool().query("DELETE FROM users WHERE username IN ('deleted_login_test', 'deleted_token_user')");
+
     // Create a temporary user with status = 'DELETED'
     const [ins] = await db.getPool().query(`
       INSERT INTO users (username, email, password_hash, role, status)

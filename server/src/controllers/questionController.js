@@ -200,8 +200,33 @@ async function getQuestionById(req, res, next) {
       }
     }
 
-    // If question has specific language restriction, narrow down compilers
-    if (question.language_id && allowedCompilers.length > 0) {
+    // Fetch question-specific supported languages from question_languages
+    const questionLangs = await db.query(`
+      SELECT ql.language_id, l.name AS language_name, l.slug AS language_slug
+      FROM question_languages ql
+      JOIN languages l ON ql.language_id = l.id
+      WHERE ql.question_id = ? AND l.enabled = TRUE
+      ORDER BY l.name ASC
+    `, [id]);
+
+    // If question specifies supported languages, narrow down allowedCompilers to those languages
+    if (questionLangs && questionLangs.length > 0) {
+      const qLangIds = questionLangs.map(ql => ql.language_id);
+      if (allowedCompilers.length > 0) {
+        allowedCompilers = allowedCompilers.filter(c => qLangIds.includes(c.languageId));
+      } else {
+        allowedCompilers = questionLangs.map(l => {
+          const conf = LANGUAGE_CONFIG[l.language_slug?.toLowerCase()];
+          return {
+            compilerId: conf?.judge0Id,
+            compilerName: conf?.displayName || l.language_name,
+            languageId: l.language_id,
+            languageName: l.language_name,
+            languageSlug: l.language_slug
+          };
+        }).filter(c => c.compilerId);
+      }
+    } else if (question.language_id && allowedCompilers.length > 0) {
       const matching = allowedCompilers.filter(c => c.languageId === question.language_id);
       if (matching.length > 0) {
         allowedCompilers = matching;
@@ -273,6 +298,18 @@ async function getQuestionById(req, res, next) {
         courseType: question.program_course_type || 'CODING',
         imageUrl: question.program_image_url || null,
         allowedCompilers,
+        languages: questionLangs && questionLangs.length > 0 ? questionLangs.map(l => ({
+          id: l.language_id,
+          name: l.language_name,
+          slug: l.language_slug
+        })) : (question.language_id ? [{
+          id: question.language_id,
+          name: question.language_name,
+          slug: question.language_slug
+        }] : []),
+        languageIds: questionLangs && questionLangs.length > 0
+          ? questionLangs.map(l => l.language_id)
+          : (question.language_id ? [question.language_id] : []),
         languageId: question.language_id,
         languageName: question.language_name,
         languageSlug: question.language_slug,
@@ -374,51 +411,52 @@ async function createQuestion(req, res, next) {
 
     const isTheory = course && course.course_type === 'THEORY';
 
-    // Verify language if provided
-    let resolvedLanguageId = language_id ? parseInt(language_id, 10) : null;
-    if (resolvedLanguageId) {
-      const langRows = await db.query(
-        'SELECT id, slug FROM languages WHERE id = ? AND enabled = TRUE',
-        [resolvedLanguageId]
-      );
-      if (!langRows || langRows.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid or disabled programming language selected.'
-        });
+    // Resolve languages: supports array `language_ids` (multi-language) and single `language_id`
+    let resolvedLanguageIds = [];
+    if (Array.isArray(req.body.language_ids) && req.body.language_ids.length > 0) {
+      resolvedLanguageIds = [...new Set(req.body.language_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0))];
+    } else if (language_id) {
+      const singleId = parseInt(language_id, 10);
+      if (!isNaN(singleId) && singleId > 0) {
+        resolvedLanguageIds = [singleId];
       }
+    }
 
-      // If course defines allowed compilers, verify selected language is one of them
-      if (allowedCourseLanguages.length > 0) {
-        const isPermitted = allowedCourseLanguages.some(l => l.language_id === resolvedLanguageId);
-        if (!isPermitted) {
-          return res.status(400).json({
-            success: false,
-            error: 'The selected programming language is not permitted for this course.'
-          });
-        }
-      }
-
-      // Compiler check if provided
-      const langSlug = langRows[0].slug.toLowerCase();
-      const expectedConfig = LANGUAGE_CONFIG[langSlug];
-      if (req.body.compiler_id && expectedConfig) {
-        const providedCompilerId = parseInt(req.body.compiler_id, 10);
-        if (providedCompilerId !== expectedConfig.judge0Id) {
-          return res.status(400).json({
-            success: false,
-            error: `Compiler mismatch: The selected language requires compiler '${expectedConfig.displayName}' (Judge0 ID ${expectedConfig.judge0Id}). Received ID ${providedCompilerId}.`
-          });
-        }
-      }
-    } else if (!isTheory && !resolvedProgramId) {
+    if (!isTheory && resolvedLanguageIds.length === 0 && !resolvedProgramId) {
       return res.status(400).json({
         success: false,
-        error: 'Programming language is required.'
+        error: 'At least one programming language is required.'
       });
     }
 
-    if (targetLevel.language_id && resolvedLanguageId && targetLevel.language_id !== resolvedLanguageId) {
+    if (resolvedLanguageIds.length > 0) {
+      const langRows = await db.query(
+        'SELECT id, slug, name FROM languages WHERE id IN (?) AND enabled = TRUE',
+        [resolvedLanguageIds]
+      );
+      if (!langRows || langRows.length !== resolvedLanguageIds.length) {
+        return res.status(400).json({
+          success: false,
+          error: 'One or more selected programming languages are invalid or disabled.'
+        });
+      }
+
+      // If course defines allowed compilers, verify ALL selected languages are permitted by the course
+      if (allowedCourseLanguages.length > 0) {
+        const permittedLangIds = allowedCourseLanguages.map(l => l.language_id);
+        const unpermitted = resolvedLanguageIds.filter(id => !permittedLangIds.includes(id));
+        if (unpermitted.length > 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'One or more selected programming languages are not permitted for this course.'
+          });
+        }
+      }
+    }
+
+    const primaryLangId = resolvedLanguageIds[0] || null;
+
+    if (targetLevel.language_id && primaryLangId && targetLevel.language_id !== primaryLangId) {
       return res.status(400).json({
         success: false,
         error: 'Selected level does not belong to the selected programming language.'
@@ -455,11 +493,19 @@ async function createQuestion(req, res, next) {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
       `, [
         resolvedProgramId, title.trim(), statement.trim(), cleanInputFormat, cleanOutputFormat, cleanConstraints,
-        explanation ? explanation.trim() : '', resolvedLanguageId, level_id,
+        explanation ? explanation.trim() : '', primaryLangId, level_id,
         userId
       ]);
 
       const qId = insertRes.insertId;
+
+      // Insert multi-language associations into question_languages
+      for (const lId of resolvedLanguageIds) {
+        await conn.query(`
+          INSERT INTO question_languages (question_id, language_id)
+          VALUES (?, ?)
+        `, [qId, lId]);
+      }
 
       // Insert visible samples
       if (Array.isArray(samples)) {

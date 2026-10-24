@@ -183,7 +183,7 @@ async function getAdminQuestionDetails(questionId) {
       (SELECT COUNT(DISTINCT reporter_id) FROM question_reports WHERE question_id = q.id) AS distinct_report_count,
       (SELECT COUNT(*) FROM question_votes WHERE question_id = q.id) AS useful_votes_count
     FROM questions q
-    JOIN languages l ON q.language_id = l.id
+    LEFT JOIN languages l ON q.language_id = l.id
     JOIN levels lvl ON q.level_id = lvl.id
     JOIN users u ON q.contributor_id = u.id
     WHERE q.id = ?
@@ -196,6 +196,16 @@ async function getAdminQuestionDetails(questionId) {
   }
 
   const question = questions[0];
+
+  // Fetch all supported languages for this question
+  const questionLanguages = await db.query(`
+    SELECT ql.language_id, l.name AS language_name, l.slug AS language_slug
+    FROM question_languages ql
+    JOIN languages l ON ql.language_id = l.id
+    WHERE ql.question_id = ?
+    ORDER BY l.name ASC
+  `, [questionId]);
+  question.languages = questionLanguages;
 
   // Samples
   const samples = await db.query(
@@ -2381,7 +2391,7 @@ async function getProgramLevelsAdmin(programId) {
 /**
  * Program Level Sub-resources: Create an independent level in a program
  */
-async function createProgramLevelAdmin(programId, { level_number, title, description = '', enabled = true }) {
+async function createProgramLevelAdmin(programId, { level_number, levelNumber, title, description = '', enabled = true }) {
   const pId = parseInt(programId, 10);
   if (isNaN(pId) || pId < 1) {
     const err = new Error('Invalid program ID.');
@@ -2389,16 +2399,17 @@ async function createProgramLevelAdmin(programId, { level_number, title, descrip
     throw err;
   }
 
-  const [progRows] = await db.query('SELECT id, name FROM programs WHERE id = ?', [pId]);
+  const progRows = await db.query('SELECT id, name FROM programs WHERE id = ?', [pId]);
   if (!progRows || progRows.length === 0) {
     const err = new Error('Program not found.');
     err.statusCode = 404;
     throw err;
   }
 
-  let finalNumber = parseInt(level_number, 10);
+  const rawNumber = level_number !== undefined ? level_number : levelNumber;
+  let finalNumber = parseInt(rawNumber, 10);
   if (isNaN(finalNumber) || finalNumber < 1) {
-    const [maxRes] = await db.query('SELECT MAX(level_number) AS max_num FROM levels WHERE program_id = ?', [pId]);
+    const maxRes = await db.query('SELECT MAX(level_number) AS max_num FROM levels WHERE program_id = ?', [pId]);
     finalNumber = (maxRes[0]?.max_num || 0) + 1;
   }
 
@@ -2409,7 +2420,7 @@ async function createProgramLevelAdmin(programId, { level_number, title, descrip
     throw err;
   }
 
-  const [existing] = await db.query(
+  const existing = await db.query(
     'SELECT id FROM levels WHERE program_id = ? AND level_number = ?',
     [pId, finalNumber]
   );
@@ -2419,7 +2430,7 @@ async function createProgramLevelAdmin(programId, { level_number, title, descrip
     throw err;
   }
 
-  const [res] = await db.query(
+  const res = await db.query(
     'INSERT INTO levels (program_id, level_number, title, description, enabled) VALUES (?, ?, ?, ?, ?)',
     [pId, finalNumber, cleanTitle, description ? String(description).trim() : '', Boolean(enabled)]
   );
@@ -2441,11 +2452,11 @@ async function createProgramLevelAdmin(programId, { level_number, title, descrip
 /**
  * Program Level Sub-resources: Update a level in a program
  */
-async function updateProgramLevelAdmin(programId, levelId, { level_number, title, description, enabled }) {
+async function updateProgramLevelAdmin(programId, levelId, { level_number, levelNumber, title, description, enabled }) {
   const pId = parseInt(programId, 10);
   const lId = parseInt(levelId, 10);
 
-  const [current] = await db.query('SELECT * FROM levels WHERE id = ? AND program_id = ?', [lId, pId]);
+  const current = await db.query('SELECT * FROM levels WHERE id = ? AND program_id = ?', [lId, pId]);
   if (!current || current.length === 0) {
     const err = new Error('Level not found in the specified program.');
     err.statusCode = 404;
@@ -2454,15 +2465,16 @@ async function updateProgramLevelAdmin(programId, levelId, { level_number, title
 
   const cur = current[0];
   let newNum = cur.level_number;
-  if (level_number !== undefined) {
-    const num = parseInt(level_number, 10);
+  const rawNumber = level_number !== undefined ? level_number : levelNumber;
+  if (rawNumber !== undefined) {
+    const num = parseInt(rawNumber, 10);
     if (isNaN(num) || num < 1) {
       const err = new Error('Invalid level number.');
       err.statusCode = 400;
       throw err;
     }
     if (num !== cur.level_number) {
-      const [conflict] = await db.query('SELECT id FROM levels WHERE program_id = ? AND level_number = ? AND id != ?', [pId, num, lId]);
+      const conflict = await db.query('SELECT id FROM levels WHERE program_id = ? AND level_number = ? AND id != ?', [pId, num, lId]);
       if (conflict && conflict.length > 0) {
         const err = new Error(`Level number ${num} is already used in this program.`);
         err.statusCode = 409;
@@ -2519,14 +2531,14 @@ async function deleteProgramLevelAdmin(programId, levelId, { force = false } = {
   const pId = parseInt(programId, 10);
   const lId = parseInt(levelId, 10);
 
-  const [current] = await db.query('SELECT * FROM levels WHERE id = ? AND program_id = ?', [lId, pId]);
+  const current = await db.query('SELECT * FROM levels WHERE id = ? AND program_id = ?', [lId, pId]);
   if (!current || current.length === 0) {
     const err = new Error('Level not found in the specified program.');
     err.statusCode = 404;
     throw err;
   }
 
-  const [qCountRes] = await db.query('SELECT COUNT(*) AS total FROM questions WHERE level_id = ?', [lId]);
+  const qCountRes = await db.query('SELECT COUNT(*) AS total FROM questions WHERE level_id = ?', [lId]);
   const questionCount = parseInt(qCountRes[0]?.total || 0, 10);
 
   if (questionCount > 0 && !force) {
@@ -2547,6 +2559,39 @@ async function deleteProgramLevelAdmin(programId, levelId, { force = false } = {
   return {
     success: true,
     message: `Level ${current[0].level_number} deleted successfully.`
+  };
+}
+
+/**
+ * Program Level Sub-resources: Reorder levels in a program
+ */
+async function reorderProgramLevelsAdmin(programId, levelOrders) {
+  const pId = parseInt(programId, 10);
+  if (isNaN(pId) || pId < 1) {
+    const err = new Error('Invalid program ID.');
+    err.statusCode = 400;
+    throw err;
+  }
+  const orders = Array.isArray(levelOrders) ? levelOrders : [];
+  if (orders.length === 0) {
+    const err = new Error('levelOrders array is required for reordering.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  await db.withTransaction(async (conn) => {
+    for (const item of orders) {
+      const lvlId = parseInt(item.id, 10);
+      const newNum = parseInt(item.level_number !== undefined ? item.level_number : item.levelNumber, 10);
+      if (!isNaN(lvlId) && !isNaN(newNum)) {
+        await conn.query('UPDATE levels SET level_number = ? WHERE id = ? AND program_id = ?', [newNum, lvlId, pId]);
+      }
+    }
+  });
+
+  return {
+    success: true,
+    message: 'Levels reordered successfully.'
   };
 }
 
@@ -2577,6 +2622,7 @@ module.exports = {
   getProgramLevelsAdmin,
   createProgramLevelAdmin,
   updateProgramLevelAdmin,
-  deleteProgramLevelAdmin
+  deleteProgramLevelAdmin,
+  reorderProgramLevelsAdmin
 };
 

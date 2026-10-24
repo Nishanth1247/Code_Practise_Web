@@ -93,13 +93,30 @@ async function runCode(req, res, next) {
       }
     }
 
-    // Enforce Per-Question Language Restriction if configured
-    if (question.language_id) {
-      const [qLang] = await db.query('SELECT slug FROM languages WHERE id = ?', [question.language_id]);
+    // Enforce Per-Question Language Restriction
+    const qLangs = await db.query(`
+      SELECT l.slug
+      FROM question_languages ql
+      JOIN languages l ON ql.language_id = l.id
+      WHERE ql.question_id = ?
+    `, [questionId]);
+
+    if (qLangs && qLangs.length > 0) {
+      const isSupported = qLangs.some(ql => ql.slug.toLowerCase() === langSlug);
+      if (!isSupported) {
+        const supportedNames = qLangs.map(ql => ql.slug.toUpperCase()).join(', ');
+        return res.status(400).json({
+          success: false,
+          error: `Compiler '${langConfig.displayName}' is not permitted for this question. This question only accepts solutions written in: ${supportedNames}.`
+        });
+      }
+    } else if (question.language_id) {
+      const qLangRes = await db.query('SELECT slug FROM languages WHERE id = ?', [question.language_id]);
+      const qLang = qLangRes && qLangRes[0];
       if (qLang && qLang.slug.toLowerCase() !== langSlug) {
         return res.status(400).json({
           success: false,
-          error: `This question only accepts solutions written in ${qLang.slug.toUpperCase()}.`
+          error: `Compiler '${langConfig.displayName}' is not permitted for this question. This question only accepts solutions written in ${qLang.slug.toUpperCase()}.`
         });
       }
     }
@@ -236,13 +253,30 @@ async function submitSolution(req, res, next) {
       }
     }
 
-    // Enforce Per-Question Language Restriction if configured
-    if (question.language_id) {
-      const [qLang] = await db.query('SELECT slug FROM languages WHERE id = ?', [question.language_id]);
+    // Enforce Per-Question Language Restriction
+    const qLangs = await db.query(`
+      SELECT l.slug
+      FROM question_languages ql
+      JOIN languages l ON ql.language_id = l.id
+      WHERE ql.question_id = ?
+    `, [questionId]);
+
+    if (qLangs && qLangs.length > 0) {
+      const isSupported = qLangs.some(ql => ql.slug.toLowerCase() === langSlug);
+      if (!isSupported) {
+        const supportedNames = qLangs.map(ql => ql.slug.toUpperCase()).join(', ');
+        return res.status(400).json({
+          success: false,
+          error: `Compiler '${langConfig.displayName}' is not permitted for this question. This question only accepts solutions written in: ${supportedNames}.`
+        });
+      }
+    } else if (question.language_id) {
+      const qLangRes = await db.query('SELECT slug FROM languages WHERE id = ?', [question.language_id]);
+      const qLang = qLangRes && qLangRes[0];
       if (qLang && qLang.slug.toLowerCase() !== langSlug) {
         return res.status(400).json({
           success: false,
-          error: `This question only accepts solutions written in ${qLang.slug.toUpperCase()}.`
+          error: `Compiler '${langConfig.displayName}' is not permitted for this question. This question only accepts solutions written in ${qLang.slug.toUpperCase()}.`
         });
       }
     }

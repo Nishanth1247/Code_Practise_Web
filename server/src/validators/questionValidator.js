@@ -30,6 +30,14 @@ const validateCreateQuestion = [
   body('constraints_text')
     .optional({ nullable: true })
     .trim(),
+  body('language_ids')
+    .optional({ nullable: true })
+    .isArray()
+    .withMessage('Language IDs must be an array'),
+  body('language_ids.*')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Each language ID must be a positive integer'),
   body('language_id')
     .optional({ nullable: true })
     .custom((val) => {
