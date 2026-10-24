@@ -8,7 +8,15 @@ const { LANGUAGE_CONFIG, getCompilerConfig } = require('../config/judge0');
  */
 async function runCode(req, res, next) {
   try {
-    const { questionId, language, sourceCode } = req.body;
+    const questionId = req.body.questionId || req.body.question_id;
+    let language = req.body.language || req.body.language_slug;
+    const sourceCode = req.body.sourceCode || req.body.source_code || req.body.code;
+    const compilerId = req.body.compilerId !== undefined ? req.body.compilerId : req.body.compiler_id;
+
+    if (!language && compilerId) {
+      const foundLang = Object.entries(LANGUAGE_CONFIG).find(([_, conf]) => conf.judge0Id === parseInt(compilerId, 10));
+      if (foundLang) language = foundLang[0];
+    }
 
     if (!questionId || !language || !sourceCode) {
       return res.status(400).json({
@@ -59,8 +67,17 @@ async function runCode(req, res, next) {
       }
     }
 
-    // Enforce Program Allowed Compilers
+    // Enforce Course Allowed Compilers
     if (question.program_id) {
+      const progRows = await db.query('SELECT name, course_type FROM programs WHERE id = ?', [question.program_id]);
+      const prog = progRows && progRows[0];
+      if (prog && prog.course_type === 'THEORY') {
+        return res.status(400).json({
+          success: false,
+          error: `The course '${prog.name}' is a theory course and does not support code execution.`
+        });
+      }
+
       const allowedLangs = await db.query(`
         SELECT pl.compiler_id, l.slug
         FROM program_languages pl
@@ -71,7 +88,7 @@ async function runCode(req, res, next) {
       if (!allowedLangs || allowedLangs.length === 0) {
         return res.status(400).json({
           success: false,
-          error: `Compiler '${langConfig.displayName}' is not permitted for questions in this program track.`
+          error: `Compiler '${langConfig.displayName}' is not permitted for questions in this program track / course.`
         });
       }
     }
@@ -134,7 +151,15 @@ async function runCode(req, res, next) {
 async function submitSolution(req, res, next) {
   try {
     const userId = req.user.id;
-    const { questionId, language, sourceCode } = req.body;
+    const questionId = req.body.questionId || req.body.question_id;
+    let language = req.body.language || req.body.language_slug;
+    const sourceCode = req.body.sourceCode || req.body.source_code || req.body.code;
+    const compilerId = req.body.compilerId !== undefined ? req.body.compilerId : req.body.compiler_id;
+
+    if (!language && compilerId) {
+      const foundLang = Object.entries(LANGUAGE_CONFIG).find(([_, conf]) => conf.judge0Id === parseInt(compilerId, 10));
+      if (foundLang) language = foundLang[0];
+    }
 
     if (!questionId || !language || !sourceCode) {
       return res.status(400).json({
@@ -185,8 +210,17 @@ async function submitSolution(req, res, next) {
       }
     }
 
-    // Enforce Program Allowed Compilers
+    // Enforce Course Allowed Compilers
     if (question.program_id) {
+      const progRows = await db.query('SELECT name, course_type FROM programs WHERE id = ?', [question.program_id]);
+      const prog = progRows && progRows[0];
+      if (prog && prog.course_type === 'THEORY') {
+        return res.status(400).json({
+          success: false,
+          error: `The course '${prog.name}' is a theory course and does not support code execution.`
+        });
+      }
+
       const allowedLangs = await db.query(`
         SELECT pl.compiler_id, l.slug
         FROM program_languages pl
@@ -197,7 +231,7 @@ async function submitSolution(req, res, next) {
       if (!allowedLangs || allowedLangs.length === 0) {
         return res.status(400).json({
           success: false,
-          error: `Compiler '${langConfig.displayName}' is not permitted for questions in this program track.`
+          error: `Compiler '${langConfig.displayName}' is not permitted for questions in this program track / course.`
         });
       }
     }

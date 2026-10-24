@@ -73,12 +73,14 @@ export function AdminProgramsPage() {
   // Notifications
   const [notification, setNotification] = useState(null);
 
-  // Program Create/Edit Modal
+  // Program / Course Create/Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProgram, setEditingProgram] = useState(null);
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formIcon, setFormIcon] = useState('Code');
+  const [formImageUrl, setFormImageUrl] = useState('');
+  const [formCourseType, setFormCourseType] = useState('CODING');
   const [formStatus, setFormStatus] = useState('ACTIVE');
   const [formCompilers, setFormCompilers] = useState([1]); // default C
   const [formLevelCount, setFormLevelCount] = useState(5);
@@ -173,6 +175,8 @@ export function AdminProgramsPage() {
     setFormName('');
     setFormDescription('');
     setFormIcon('Code');
+    setFormImageUrl('');
+    setFormCourseType('CODING');
     setFormStatus('ACTIVE');
     setFormCompilers([1, 2, 3, 4]); // default select all 4 compilers
     setFormLevelCount(5);
@@ -187,17 +191,19 @@ export function AdminProgramsPage() {
     setFormName(prog.name);
     setFormDescription(prog.description || '');
     setFormIcon(prog.icon || 'Code');
+    setFormImageUrl(prog.imageUrl || prog.image_url || '');
+    setFormCourseType(prog.courseType || prog.course_type || 'CODING');
     setFormStatus(prog.status);
     setFormError('');
 
     // Pre-select compilers
     const compilerLangIds = (prog.compilers || []).map(c => c.language_id);
-    setFormCompilers(compilerLangIds.length > 0 ? compilerLangIds : [1]);
+    setFormCompilers(compilerLangIds.length > 0 ? compilerLangIds : (prog.course_type === 'THEORY' || prog.courseType === 'THEORY') ? [] : [1]);
 
     // Fetch existing levels for this program
     try {
       setFormLoading(true);
-      const res = await api.get(`/admin/programs/${prog.id}/levels`);
+      const res = await api.get(`/admin/courses/${prog.id}/levels`);
       const lvls = res.data.levels || [];
       const count = lvls.length > 0 ? lvls.length : 5;
       setFormLevelCount(count);
@@ -273,8 +279,8 @@ export function AdminProgramsPage() {
   const handleToggleCompiler = (langId) => {
     setFormCompilers(prev => {
       if (prev.includes(langId)) {
-        if (prev.length <= 1) {
-          setFormError('At least one supported compiler must remain selected.');
+        if (formCourseType === 'CODING' && prev.length <= 1) {
+          setFormError('At least one supported compiler must remain selected for coding practice tracks.');
           return prev;
         }
         return prev.filter(id => id !== langId);
@@ -290,12 +296,12 @@ export function AdminProgramsPage() {
     if (e) e.preventDefault();
 
     if (!formName.trim() || formName.trim().length < 3) {
-      setFormError('Program name must be at least 3 characters.');
+      setFormError('Course name must be at least 3 characters.');
       return;
     }
 
-    if (formCompilers.length === 0) {
-      setFormError('Please select at least one supported compiler/language.');
+    if (formCourseType === 'CODING' && formCompilers.length === 0) {
+      setFormError('Please select at least one supported compiler/language for coding courses.');
       return;
     }
 
@@ -323,8 +329,10 @@ export function AdminProgramsPage() {
       name: formName.trim(),
       description: formDescription.trim(),
       icon: formIcon,
+      course_type: formCourseType,
+      image_url: formImageUrl.trim() || null,
       status: formStatus,
-      compilers: compilersPayload,
+      compilers: formCourseType === 'THEORY' && formCompilers.length === 0 ? [] : compilersPayload,
       levels: formLevels.map(lvl => ({
         id: lvl.id || undefined,
         level_number: lvl.level_number,
@@ -337,11 +345,11 @@ export function AdminProgramsPage() {
 
     try {
       if (editingProgram) {
-        await api.patch(`/admin/programs/${editingProgram.id}`, payload);
-        setNotification({ type: 'success', message: `Program '${payload.name}' updated successfully!` });
+        await api.patch(`/admin/courses/${editingProgram.id}`, payload);
+        setNotification({ type: 'success', message: `Course '${payload.name}' updated successfully!` });
       } else {
-        await api.post('/admin/programs', payload);
-        setNotification({ type: 'success', message: `Program '${payload.name}' created with ${formLevels.length} independent level(s)!` });
+        await api.post('/admin/courses', payload);
+        setNotification({ type: 'success', message: `Course '${payload.name}' created with ${formLevels.length} independent level(s)!` });
       }
 
       setIsModalOpen(false);
@@ -351,7 +359,7 @@ export function AdminProgramsPage() {
       if (err.response?.data?.code === 'POPULATED_LEVEL_REDUCTION') {
         setLevelReductionWarning(err.response.data);
       } else {
-        setFormError(err.response?.data?.error || 'Failed to save program.');
+        setFormError(err.response?.data?.error || 'Failed to save course.');
       }
     } finally {
       setFormLoading(false);
@@ -363,11 +371,11 @@ export function AdminProgramsPage() {
     setManagingProgram(prog);
     setManagingLoading(true);
     try {
-      const res = await api.get(`/admin/programs/${prog.id}/levels`);
+      const res = await api.get(`/admin/courses/${prog.id}/levels`);
       setManagingLevels(res.data.levels || []);
     } catch (err) {
       console.error('Failed to load levels:', err);
-      setNotification({ type: 'error', message: 'Failed to load levels for program.' });
+      setNotification({ type: 'error', message: 'Failed to load levels for course.' });
     } finally {
       setManagingLoading(false);
     }
@@ -376,7 +384,7 @@ export function AdminProgramsPage() {
   // Toggle Level Enabled State inside Drawer
   const handleToggleLevelEnabled = async (lvl) => {
     try {
-      await api.patch(`/admin/programs/${managingProgram.id}/levels/${lvl.id}`, {
+      await api.patch(`/admin/courses/${managingProgram.id}/levels/${lvl.id}`, {
         enabled: !lvl.enabled
       });
       setManagingLevels(prev => prev.map(l => l.id === lvl.id ? { ...l, enabled: !l.enabled } : l));
@@ -392,15 +400,15 @@ export function AdminProgramsPage() {
     if (!deletingProgram) return;
     setDeleteLoading(true);
     try {
-      await api.delete(`/admin/programs/${deletingProgram.id}`);
+      await api.delete(`/admin/courses/${deletingProgram.id}`);
       setNotification({
         type: 'success',
-        message: `Program '${deletingProgram.name}' deleted. Questions and submissions remain preserved.`
+        message: `Course '${deletingProgram.name}' deleted. Questions and submissions remain preserved.`
       });
       setDeletingProgram(null);
       fetchPrograms();
     } catch (err) {
-      setNotification({ type: 'error', message: err.response?.data?.error || 'Failed to delete program.' });
+      setNotification({ type: 'error', message: err.response?.data?.error || 'Failed to delete course.' });
     } finally {
       setDeleteLoading(false);
     }
@@ -431,13 +439,13 @@ export function AdminProgramsPage() {
         <div>
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#2563EB] mb-1">
             <BookOpen className="w-4 h-4" />
-            Curriculum Architecture
+            Curriculum & Course Architecture
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1E3A8A]">
-            Independent Program Tracks
+            Practice Courses Management
           </h1>
           <p className="text-[#64748B] text-xs sm:text-sm mt-1 max-w-2xl">
-            Create and manage self-contained practice tracks with customizable level progressions and multi-compiler Judge0 runtime restrictions.
+            Create and manage self-contained practice courses with customizable level progressions, coding vs theory tracks, and compiler runtime restrictions.
           </p>
         </div>
 
@@ -446,7 +454,7 @@ export function AdminProgramsPage() {
           className="px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-all shrink-0 hover:shadow-md"
         >
           <Plus className="w-4 h-4" />
-          Create Program Track
+          Create Practice Course
         </button>
       </div>
 
@@ -454,19 +462,19 @@ export function AdminProgramsPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-5 rounded-2xl bg-white border border-[#DBEAFE] shadow-sm">
           <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B] block mb-1">
-            Total Programs
+            Total Courses
           </span>
           <div className="text-2xl sm:text-3xl font-extrabold text-[#1E3A8A]">{counts.total || 0}</div>
         </div>
         <div className="p-5 rounded-2xl bg-white border border-[#DBEAFE] shadow-sm">
           <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 block mb-1">
-            Active Tracks
+            Active Courses
           </span>
           <div className="text-2xl sm:text-3xl font-extrabold text-emerald-700">{counts.active || 0}</div>
         </div>
         <div className="p-5 rounded-2xl bg-white border border-[#DBEAFE] shadow-sm">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
-            Inactive Tracks
+            Inactive Courses
           </span>
           <div className="text-2xl sm:text-3xl font-extrabold text-slate-700">{counts.inactive || 0}</div>
         </div>
@@ -474,7 +482,7 @@ export function AdminProgramsPage() {
           <span className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB] block mb-1">
             Judge0 Compilers
           </span>
-          <div className="text-2xl sm:text-3xl font-extrabold text-[#2563EB]">4 Active</div>
+          <div className="text-2xl sm:text-3xl font-extrabold text-[#2563EB]">4 Supported</div>
         </div>
       </div>
 
@@ -486,7 +494,7 @@ export function AdminProgramsPage() {
             type="text"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            placeholder="Search programs by name or description..."
+            placeholder="Search courses by name or description..."
             className="w-full pl-9 pr-3.5 py-2 text-xs rounded-xl border border-[#CBD5E1] bg-[#F5F9FF] text-[#172554] placeholder-[#94A3B8] focus:outline-none focus:border-[#2563EB] focus:bg-white"
           />
         </div>
@@ -498,35 +506,47 @@ export function AdminProgramsPage() {
             className="w-full sm:w-auto px-3.5 py-2 text-xs rounded-xl border border-[#CBD5E1] bg-[#F5F9FF] text-[#172554] font-semibold focus:outline-none focus:border-[#2563EB] focus:bg-white"
           >
             <option value="">All Statuses</option>
-            <option value="ACTIVE">Active Tracks Only</option>
-            <option value="INACTIVE">Inactive Tracks</option>
+            <option value="ACTIVE">Active Courses Only</option>
+            <option value="INACTIVE">Inactive Courses</option>
           </select>
         </div>
       </div>
 
       {/* Program Grid */}
       {loading ? (
-        <LoadingSpinner message="Loading independent program tracks..." />
+        <LoadingSpinner message="Loading practice courses..." />
       ) : programs.length === 0 ? (
         <EmptyState
-          title="No programs found"
-          description="Create your first independent practice track with customized levels and allowed compilers."
+          title="No courses found"
+          description="Create your first practice course with customized levels and allowed compilers."
           icon={BookOpen}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {programs.map((prog) => {
             const isActive = prog.status === 'ACTIVE';
+            const isTheory = prog.courseType === 'THEORY' || prog.course_type === 'THEORY';
             return (
               <div
                 key={prog.id}
                 className="p-6 bg-white border border-[#DBEAFE] hover:border-[#2563EB] rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
               >
                 <div>
-                  {/* Top Bar with Icon and Status */}
+                  {/* Top Bar with Icon, Course Type and Status */}
                   <div className="flex items-start justify-between gap-3 mb-4">
-                    <div className="p-3 rounded-xl bg-[#F5F9FF] border border-[#DBEAFE] text-[#2563EB] group-hover:bg-[#2563EB] group-hover:text-white transition-colors">
-                      <ProgramIcon iconName={prog.icon} className="w-6 h-6" />
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 rounded-xl bg-[#F5F9FF] border border-[#DBEAFE] text-[#2563EB] group-hover:bg-[#2563EB] group-hover:text-white transition-colors">
+                        <ProgramIcon iconName={prog.icon} className="w-6 h-6" />
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                          isTheory
+                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                            : 'bg-blue-50 text-blue-700 border border-blue-200'
+                        }`}
+                      >
+                        {isTheory ? 'Theory Course' : 'Coding Practice'}
+                      </span>
                     </div>
                     <span
                       className={`text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider border ${
@@ -548,7 +568,7 @@ export function AdminProgramsPage() {
                   </span>
 
                   <p className="text-xs text-[#64748B] line-clamp-2 mb-4 min-h-[32px]">
-                    {prog.description || 'Independent learning track with progressive practice levels.'}
+                    {prog.description || 'Independent practice course with progressive levels.'}
                   </p>
 
                   {/* Compilers Badges */}
@@ -556,20 +576,26 @@ export function AdminProgramsPage() {
                     <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] block mb-1.5">
                       Allowed Compilers:
                     </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(prog.compilers || []).map((comp) => (
-                        <span
-                          key={comp.compiler_id || comp.language_slug}
-                          className="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-[#F5F9FF] text-[#1E3A8A] border border-[#DBEAFE]"
-                          title={`Judge0 ID ${comp.compiler_id}: ${comp.compiler_name}`}
-                        >
-                          {comp.language_name} ({comp.compiler_name})
-                        </span>
-                      ))}
-                      {(!prog.compilers || prog.compilers.length === 0) && (
-                        <span className="text-xs text-rose-500 font-semibold">No compilers configured</span>
-                      )}
-                    </div>
+                    {isTheory ? (
+                      <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200 inline-block">
+                        Conceptual / Reading (No code compilers required)
+                      </span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(prog.compilers || []).map((comp) => (
+                          <span
+                            key={comp.compiler_id || comp.language_slug}
+                            className="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-[#F5F9FF] text-[#1E3A8A] border border-[#DBEAFE]"
+                            title={`Judge0 ID ${comp.compiler_id}: ${comp.compiler_name}`}
+                          >
+                            {comp.language_name} ({comp.compiler_name})
+                          </span>
+                        ))}
+                        {(!prog.compilers || prog.compilers.length === 0) && (
+                          <span className="text-xs text-rose-500 font-semibold">No compilers configured</span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Metrics */}
@@ -599,14 +625,14 @@ export function AdminProgramsPage() {
                     <button
                       onClick={() => handleOpenEditModal(prog)}
                       className="p-1.5 rounded-lg text-[#64748B] hover:text-[#2563EB] hover:bg-[#F5F9FF] transition-colors"
-                      title="Edit Program Track"
+                      title="Edit Course"
                     >
                       <Edit className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => setDeletingProgram(prog)}
                       className="p-1.5 rounded-lg text-[#64748B] hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                      title="Delete Program Track"
+                      title="Delete Course"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -630,7 +656,7 @@ export function AdminProgramsPage() {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-[#1E3A8A]">
-                    {editingProgram ? 'Edit Program Track' : 'Create Independent Program'}
+                    {editingProgram ? 'Edit Practice Course' : 'Create Practice Course'}
                   </h2>
                   <p className="text-xs text-[#64748B] mt-0.5">
                     Configure independent ordered levels and Judge0 compiler runtime permissions.
@@ -658,19 +684,19 @@ export function AdminProgramsPage() {
               {/* SECTION 1: Identity */}
               <div className="space-y-4">
                 <h3 className="text-xs font-bold text-[#1E3A8A] uppercase tracking-wider border-b border-[#DBEAFE] pb-1.5">
-                  1. Program Track Identity
+                  1. Practice Course Identity
                 </h3>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="sm:col-span-2">
                     <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1">
-                      Program Name *
+                      Course Name *
                     </label>
                     <input
                       type="text"
                       value={formName}
                       onChange={(e) => setFormName(e.target.value)}
-                      placeholder="e.g. C Programming, DSA Practice, System Design"
+                      placeholder="e.g. Sliding Window, Dynamic Programming, C Programming, DSA"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-semibold focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
                       required
                     />
@@ -678,7 +704,7 @@ export function AdminProgramsPage() {
 
                   <div>
                     <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1">
-                      Track Status *
+                      Course Status *
                     </label>
                     <select
                       value={formStatus}
@@ -691,17 +717,76 @@ export function AdminProgramsPage() {
                   </div>
                 </div>
 
+                {/* Course Type (Coding vs Theory) */}
                 <div>
-                  <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1">
-                    Description
+                  <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1.5">
+                    Course Type *
                   </label>
-                  <textarea
-                    rows={2}
-                    value={formDescription}
-                    onChange={(e) => setFormDescription(e.target.value)}
-                    placeholder="Brief overview of curriculum topics, learning objectives, and progression."
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-medium focus:outline-none focus:border-[#2563EB]"
-                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFormCourseType('CODING')}
+                      className={`p-3.5 rounded-xl border text-left transition-all ${
+                        formCourseType === 'CODING'
+                          ? 'bg-[#F5F9FF] border-[#2563EB] ring-2 ring-[#2563EB]/20'
+                          : 'bg-white border-[#E2E8F0] hover:border-[#CBD5E1]'
+                      }`}
+                    >
+                      <div className="font-bold text-xs text-[#1E3A8A] flex items-center justify-between">
+                        <span>Coding Practice</span>
+                        {formCourseType === 'CODING' && <Check className="w-4 h-4 text-[#2563EB]" />}
+                      </div>
+                      <p className="text-[11px] text-[#64748B] mt-1">
+                        Interactive problems with Judge0 code execution, live test cases, and compiler limits.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFormCourseType('THEORY')}
+                      className={`p-3.5 rounded-xl border text-left transition-all ${
+                        formCourseType === 'THEORY'
+                          ? 'bg-purple-50 border-purple-600 ring-2 ring-purple-600/20'
+                          : 'bg-white border-[#E2E8F0] hover:border-[#CBD5E1]'
+                      }`}
+                    >
+                      <div className="font-bold text-xs text-purple-950 flex items-center justify-between">
+                        <span>Theory / Conceptual</span>
+                        {formCourseType === 'THEORY' && <Check className="w-4 h-4 text-purple-600" />}
+                      </div>
+                      <p className="text-[11px] text-[#64748B] mt-1">
+                        Reading and conceptual questions. No Judge0 execution or compiler runtimes required.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1">
+                      Description
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formDescription}
+                      onChange={(e) => setFormDescription(e.target.value)}
+                      placeholder="Brief overview of curriculum topics, learning objectives, and progression."
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-medium focus:outline-none focus:border-[#2563EB]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#1E3A8A] uppercase tracking-wider mb-1">
+                      Cover Image URL (Optional)
+                    </label>
+                    <input
+                      type="url"
+                      value={formImageUrl}
+                      onChange={(e) => setFormImageUrl(e.target.value)}
+                      placeholder="https://example.com/course-banner.png"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#CBD5E1] bg-white text-[#172554] text-xs font-medium focus:outline-none focus:border-[#2563EB]"
+                    />
+                  </div>
                 </div>
 
                 {/* Icon Selection */}
@@ -740,13 +825,19 @@ export function AdminProgramsPage() {
                     2. Allowed Compilers & Runtimes (Judge0)
                   </h3>
                   <span className="text-[11px] font-semibold text-[#2563EB]">
-                    {formCompilers.length} Selected
+                    {formCourseType === 'THEORY' ? 'None needed (Theory)' : `${formCompilers.length} Selected`}
                   </span>
                 </div>
 
-                <p className="text-xs text-[#64748B]">
-                  Learners solving questions in this program will only be permitted to execute code with the selected compiler runtimes.
-                </p>
+                {formCourseType === 'THEORY' ? (
+                  <div className="p-3.5 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 text-xs">
+                    This is a <strong>Theory Course</strong>. Learners explore conceptual questions and do not require code execution. Compilers are optional.
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#64748B]">
+                    Learners solving questions in this course will only be permitted to execute code with the selected compiler runtimes.
+                  </p>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {SYSTEM_COMPILERS.map((comp) => {
@@ -893,7 +984,7 @@ export function AdminProgramsPage() {
                 className="px-6 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
-                {formLoading ? 'Saving...' : editingProgram ? 'Save Program Changes' : 'Create Program Track'}
+                {formLoading ? 'Saving...' : editingProgram ? 'Save Course Changes' : 'Create Practice Course'}
               </button>
             </div>
           </div>

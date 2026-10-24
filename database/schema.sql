@@ -197,11 +197,14 @@ CREATE TABLE IF NOT EXISTS `programs` (
   `slug` VARCHAR(100) NOT NULL UNIQUE,
   `description` TEXT,
   `icon` VARCHAR(50) NOT NULL DEFAULT 'Code',
+  `course_type` ENUM('CODING', 'THEORY') NOT NULL DEFAULT 'CODING',
+  `image_url` VARCHAR(255) NULL,
   `status` ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_programs_status` (`status`),
-  INDEX `idx_programs_slug` (`slug`)
+  INDEX `idx_programs_slug` (`slug`),
+  INDEX `idx_programs_course_type` (`course_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 14. Program Languages Junction Table (Allowed compilers & runtimes per program)

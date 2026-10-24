@@ -57,6 +57,7 @@ app.use('/api/questions', questionRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/progress', progressRoutes);
 app.use('/api/programs', programRoutes);
+app.use('/api/courses', programRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Catch 404 for undefined API endpoints

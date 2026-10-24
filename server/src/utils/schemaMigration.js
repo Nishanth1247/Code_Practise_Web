@@ -327,6 +327,37 @@ async function runIdempotentMigrations(connection, databaseName) {
   }
 
   // ---------------------------------------------------------------------------
+  // 10b. Ensure `programs.course_type` and `programs.image_url` exist
+  // ---------------------------------------------------------------------------
+  const [courseTypeCols] = await connection.query(`
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'programs' AND COLUMN_NAME = 'course_type'
+  `, [dbName]);
+
+  if (courseTypeCols.length === 0) {
+    await connection.query(`
+      ALTER TABLE \`programs\`
+      ADD COLUMN \`course_type\` ENUM('CODING', 'THEORY') NOT NULL DEFAULT 'CODING' AFTER \`icon\`;
+    `);
+    changes.push("Added 'course_type' column to 'programs' table (ENUM('CODING', 'THEORY') DEFAULT 'CODING').");
+  }
+
+  const [imageUrlCols] = await connection.query(`
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'programs' AND COLUMN_NAME = 'image_url'
+  `, [dbName]);
+
+  if (imageUrlCols.length === 0) {
+    await connection.query(`
+      ALTER TABLE \`programs\`
+      ADD COLUMN \`image_url\` VARCHAR(255) NULL AFTER \`course_type\`;
+    `);
+    changes.push("Added 'image_url' column to 'programs' table.");
+  }
+
+  // ---------------------------------------------------------------------------
   // 11. Ensure `program_languages` has `compiler_id` and `compiler_name`
   // ---------------------------------------------------------------------------
   const [progLangCols] = await connection.query(`

@@ -1779,8 +1779,9 @@ async function getProgramByIdAdmin(programId) {
 /**
  * Validate compilers / language_ids against system LANGUAGE_CONFIG
  */
-async function resolveAndValidateCompilers({ compilers, language_ids }) {
+async function resolveAndValidateCompilers({ compilers, language_ids, course_type = 'CODING' }) {
   const compilerList = [];
+  const isTheory = String(course_type || '').toUpperCase().trim() === 'THEORY';
 
   if (Array.isArray(compilers) && compilers.length > 0) {
     for (const c of compilers) {
@@ -1823,6 +1824,7 @@ async function resolveAndValidateCompilers({ compilers, language_ids }) {
   } else if (Array.isArray(language_ids) && language_ids.length > 0) {
     const parsedLangIds = [...new Set(language_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0))];
     if (parsedLangIds.length === 0) {
+      if (isTheory) return [];
       const err = new Error('At least one supported programming language must be selected for the program.');
       err.statusCode = 400;
       throw err;
@@ -1854,6 +1856,9 @@ async function resolveAndValidateCompilers({ compilers, language_ids }) {
         language_slug: l.slug
       });
     }
+  } else if (isTheory) {
+    // Theory-only courses do not require compilers
+    return [];
   } else {
     const err = new Error('At least one supported programming language or compiler must be selected for the program.');
     err.statusCode = 400;
@@ -1870,6 +1875,8 @@ async function createProgramAdmin({
   name,
   description = '',
   icon = 'Code',
+  image_url = null,
+  course_type = 'CODING',
   status = 'ACTIVE',
   compilers = [],
   language_ids = [],
@@ -1904,11 +1911,20 @@ async function createProgramAdmin({
     throw err;
   }
 
-  // Clean icon
+  // Validate course type
+  const cleanCourseType = String(course_type || 'CODING').toUpperCase().trim();
+  if (!['CODING', 'THEORY'].includes(cleanCourseType)) {
+    const err = new Error('Course type must be either CODING or THEORY.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Clean icon & image
   const cleanIcon = icon && typeof icon === 'string' && icon.trim() ? icon.trim() : 'Code';
+  const cleanImageUrl = image_url && typeof image_url === 'string' && image_url.trim() ? image_url.trim() : null;
 
   // Validate and resolve compilers
-  const validatedCompilers = await resolveAndValidateCompilers({ compilers, language_ids });
+  const validatedCompilers = await resolveAndValidateCompilers({ compilers, language_ids, course_type: cleanCourseType });
 
   // Validate or generate levels
   const levelRecords = [];
@@ -1985,8 +2001,8 @@ async function createProgramAdmin({
 
   return await db.withTransaction(async (conn) => {
     const [ins] = await conn.query(
-      'INSERT INTO programs (name, slug, description, icon, status) VALUES (?, ?, ?, ?, ?)',
-      [cleanName, slug, description ? description.trim() : '', cleanIcon, cleanStatus]
+      'INSERT INTO programs (name, slug, description, icon, image_url, course_type, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [cleanName, slug, description ? description.trim() : '', cleanIcon, cleanImageUrl, cleanCourseType, cleanStatus]
     );
 
     const programId = ins.insertId;
@@ -2007,20 +2023,25 @@ async function createProgramAdmin({
       );
     }
 
+    const payload = {
+      id: programId,
+      name: cleanName,
+      slug,
+      description: description ? description.trim() : '',
+      icon: cleanIcon,
+      image_url: cleanImageUrl,
+      course_type: cleanCourseType,
+      status: cleanStatus,
+      compilers: validatedCompilers,
+      languages: validatedCompilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug })),
+      levels: levelRecords
+    };
+
     return {
       success: true,
-      message: `Program '${cleanName}' created successfully with ${levelRecords.length} independent level(s) and ${validatedCompilers.length} compiler(s).`,
-      program: {
-        id: programId,
-        name: cleanName,
-        slug,
-        description: description ? description.trim() : '',
-        icon: cleanIcon,
-        status: cleanStatus,
-        compilers: validatedCompilers,
-        languages: validatedCompilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug })),
-        levels: levelRecords
-      }
+      message: `Course '${cleanName}' created successfully with ${levelRecords.length} independent level(s) and ${validatedCompilers.length} compiler(s).`,
+      program: payload,
+      course: payload
     };
   });
 }
@@ -2032,6 +2053,8 @@ async function updateProgramAdmin(programId, {
   name,
   description,
   icon,
+  image_url,
+  course_type,
   status,
   compilers,
   language_ids,
@@ -2058,6 +2081,8 @@ async function updateProgramAdmin(programId, {
   let newDescription = currentProgram.description;
   let newIcon = currentProgram.icon || 'Code';
   let newStatus = currentProgram.status;
+  let newCourseType = currentProgram.course_type || 'CODING';
+  let newImageUrl = currentProgram.image_url || null;
 
   if (name !== undefined) {
     if (typeof name !== 'string' || name.trim().length < 3 || name.trim().length > 100) {
@@ -2088,6 +2113,20 @@ async function updateProgramAdmin(programId, {
     newIcon = typeof icon === 'string' && icon.trim() ? icon.trim() : 'Code';
   }
 
+  if (course_type !== undefined) {
+    const cleanCourseType = String(course_type).toUpperCase().trim();
+    if (!['CODING', 'THEORY'].includes(cleanCourseType)) {
+      const err = new Error('Course type must be either CODING or THEORY.');
+      err.statusCode = 400;
+      throw err;
+    }
+    newCourseType = cleanCourseType;
+  }
+
+  if (image_url !== undefined) {
+    newImageUrl = typeof image_url === 'string' && image_url.trim() ? image_url.trim() : null;
+  }
+
   if (status !== undefined) {
     const cleanStatus = String(status).toUpperCase().trim();
     if (!['ACTIVE', 'INACTIVE'].includes(cleanStatus)) {
@@ -2101,7 +2140,7 @@ async function updateProgramAdmin(programId, {
   // Validate compilers if provided
   let validatedCompilers = null;
   if (compilers !== undefined || language_ids !== undefined) {
-    validatedCompilers = await resolveAndValidateCompilers({ compilers, language_ids });
+    validatedCompilers = await resolveAndValidateCompilers({ compilers, language_ids, course_type: newCourseType });
   }
 
   // Handle Level updates safely
@@ -2193,8 +2232,8 @@ async function updateProgramAdmin(programId, {
 
   return await db.withTransaction(async (conn) => {
     await conn.query(
-      'UPDATE programs SET name = ?, description = ?, icon = ?, status = ? WHERE id = ?',
-      [newName, newDescription, newIcon, newStatus, pId]
+      'UPDATE programs SET name = ?, description = ?, icon = ?, image_url = ?, course_type = ?, status = ? WHERE id = ?',
+      [newName, newDescription, newIcon, newImageUrl, newCourseType, newStatus, pId]
     );
 
     if (validatedCompilers !== null) {
@@ -2243,18 +2282,23 @@ async function updateProgramAdmin(programId, {
       WHERE pl.program_id = ?
     `, [pId]);
 
+    const payload = {
+      id: pId,
+      name: newName,
+      description: newDescription,
+      icon: newIcon,
+      image_url: newImageUrl,
+      course_type: newCourseType,
+      status: newStatus,
+      compilers: finalCompilers,
+      languages: finalCompilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug }))
+    };
+
     return {
       success: true,
-      message: `Program '${newName}' updated successfully.`,
-      program: {
-        id: pId,
-        name: newName,
-        description: newDescription,
-        icon: newIcon,
-        status: newStatus,
-        compilers: finalCompilers,
-        languages: finalCompilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug }))
-      }
+      message: `Course '${newName}' updated successfully.`,
+      program: payload,
+      course: payload
     };
   });
 }

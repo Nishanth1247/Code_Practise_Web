@@ -44,15 +44,15 @@ export function StandaloneNavbar() {
         {/* Desktop Nav Links */}
         <nav className="hidden md:flex items-center gap-2 text-sm font-semibold">
           <Link
-            to="/languages"
+            to="/courses"
             className={`px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
-              isActive('/languages')
+              isActive('/courses') || isActive('/languages')
                 ? 'bg-[#DBEAFE] text-[#1D4ED8]'
                 : 'text-[#172554] hover:text-[#2563EB] hover:bg-[#F5F9FF]'
             }`}
           >
             <Terminal className="w-4 h-4 text-[#2563EB]" />
-            Practice
+            Courses
           </Link>
 
           {isAuthenticated && (
@@ -143,11 +143,11 @@ export function StandaloneNavbar() {
       {mobileMenuOpen && (
         <div className="md:hidden border-b border-[#DBEAFE] bg-white px-4 pt-2 pb-4 space-y-1 shadow-md">
           <Link
-            to="/languages"
+            to="/courses"
             onClick={() => setMobileMenuOpen(false)}
             className="block px-3 py-2 rounded-xl text-sm font-semibold text-[#172554] hover:bg-[#F5F9FF]"
           >
-            Practice Tracks
+            Practice Courses
           </Link>
           {isAuthenticated ? (
             <>

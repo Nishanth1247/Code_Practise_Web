@@ -7,7 +7,7 @@ async function getActivePrograms(req, res, next) {
   try {
     const userId = req.user ? req.user.id : null;
     const programs = await db.query(`
-      SELECT p.id, p.name, p.slug, p.description, p.icon, p.created_at
+      SELECT p.id, p.name, p.slug, p.description, p.icon, p.image_url, p.course_type, p.status, p.created_at
       FROM programs p
       WHERE p.status = 'ACTIVE'
       ORDER BY p.id ASC
@@ -49,6 +49,8 @@ async function getActivePrograms(req, res, next) {
       enriched.push({
         ...prog,
         icon: prog.icon || 'Code',
+        courseType: prog.course_type || 'CODING',
+        imageUrl: prog.image_url || null,
         compilers,
         languages: compilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug })),
         levelCount,
@@ -60,6 +62,7 @@ async function getActivePrograms(req, res, next) {
 
     res.json({
       success: true,
+      courses: enriched,
       programs: enriched
     });
   } catch (error) {
@@ -78,15 +81,15 @@ async function getProgramBySlug(req, res, next) {
 
     const programs = await db.query(
       isNumeric
-        ? "SELECT id, name, slug, description, icon, status, created_at FROM programs WHERE id = ? AND status = 'ACTIVE'"
-        : "SELECT id, name, slug, description, icon, status, created_at FROM programs WHERE slug = ? AND status = 'ACTIVE'",
+        ? "SELECT id, name, slug, description, icon, image_url, course_type, status, created_at FROM programs WHERE id = ? AND status = 'ACTIVE'"
+        : "SELECT id, name, slug, description, icon, image_url, course_type, status, created_at FROM programs WHERE slug = ? AND status = 'ACTIVE'",
       [slug]
     );
 
     if (!programs || programs.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'Program not found or currently inactive.'
+        error: 'Course or program not found or currently inactive.'
       });
     }
 
@@ -144,12 +147,18 @@ async function getProgramBySlug(req, res, next) {
     const totalQuestions = formattedLevels.reduce((acc, l) => acc + l.totalQuestions, 0);
     const totalSolved = formattedLevels.reduce((acc, l) => acc + l.solvedQuestions, 0);
 
+    const payload = {
+      ...program,
+      icon: program.icon || 'Code',
+      imageUrl: program.image_url || null,
+      courseType: program.course_type || 'CODING',
+      compilers
+    };
+
     res.json({
       success: true,
-      program: {
-        ...program,
-        icon: program.icon || 'Code'
-      },
+      program: payload,
+      course: payload,
       compilers,
       languages: compilers.map(c => ({ id: c.language_id, name: c.language_name, slug: c.language_slug })),
       levels: formattedLevels,

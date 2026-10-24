@@ -36,9 +36,9 @@ export function AdminLayout() {
             <FileText className="w-4 h-4" />
             Questions
           </NavLink>
-          <NavLink to="/admin/programs" className={tabLinkClass}>
+          <NavLink to="/admin/courses" className={tabLinkClass}>
             <BookOpen className="w-4 h-4" />
-            Programs
+            Courses
           </NavLink>
           <NavLink to="/admin/users" className={tabLinkClass}>
             <Users className="w-4 h-4" />

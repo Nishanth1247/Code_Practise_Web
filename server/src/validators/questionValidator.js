@@ -22,20 +22,22 @@ const validateCreateQuestion = [
     .isLength({ min: 20 })
     .withMessage('Problem statement must be at least 20 characters'),
   body('input_format')
-    .trim()
-    .notEmpty()
-    .withMessage('Input format description is required'),
+    .optional({ nullable: true })
+    .trim(),
   body('output_format')
-    .trim()
-    .notEmpty()
-    .withMessage('Output format description is required'),
+    .optional({ nullable: true })
+    .trim(),
   body('constraints_text')
-    .trim()
-    .notEmpty()
-    .withMessage('Constraints are required'),
+    .optional({ nullable: true })
+    .trim(),
   body('language_id')
-    .isInt({ min: 1 })
-    .withMessage('Valid language ID is required'),
+    .optional({ nullable: true })
+    .custom((val) => {
+      if (val === null || val === undefined || val === '') return true;
+      const num = parseInt(val, 10);
+      if (isNaN(num) || num < 1) throw new Error('Valid language ID is required');
+      return true;
+    }),
   body('level_id')
     .isInt({ min: 1 })
     .withMessage('Valid level ID is required'),
@@ -44,21 +46,27 @@ const validateCreateQuestion = [
     .isInt({ min: 1 })
     .withMessage('Valid compiler ID is required'),
   body('samples')
-    .isArray({ min: 1 })
-    .withMessage('At least one sample input/output pair is required'),
+    .optional({ nullable: true })
+    .isArray()
+    .withMessage('Samples must be an array'),
   body('samples.*.sample_input')
+    .optional({ nullable: true })
     .isString()
     .withMessage('Sample input must be a string'),
   body('samples.*.expected_output')
+    .optional({ nullable: true })
     .isString()
     .withMessage('Expected sample output must be a string'),
   body('test_cases')
-    .isArray({ min: 1 })
-    .withMessage('At least one test case is required'),
+    .optional({ nullable: true })
+    .isArray()
+    .withMessage('Test cases must be an array'),
   body('test_cases.*.test_input')
+    .optional({ nullable: true })
     .isString()
     .withMessage('Test input must be a string'),
   body('test_cases.*.expected_output')
+    .optional({ nullable: true })
     .isString()
     .withMessage('Expected test output must be a string'),
   handleValidationErrors

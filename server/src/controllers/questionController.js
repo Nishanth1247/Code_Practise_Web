@@ -127,6 +127,8 @@ async function getQuestionById(req, res, next) {
         p.name AS program_name,
         p.slug AS program_slug,
         p.icon AS program_icon,
+        p.image_url AS program_image_url,
+        p.course_type AS program_course_type,
         l.name AS language_name,
         l.slug AS language_slug,
         lvl.level_number,
@@ -206,8 +208,8 @@ async function getQuestionById(req, res, next) {
       }
     }
 
-    // Default fallback if no compilers resolved
-    if (allowedCompilers.length === 0) {
+    // Default fallback if no compilers resolved AND not a program-based course
+    if (allowedCompilers.length === 0 && !question.program_id && !question.language_id) {
       allowedCompilers = Object.entries(LANGUAGE_CONFIG).map(([slug, conf]) => ({
         compilerId: conf.judge0Id,
         compilerName: conf.displayName,
@@ -224,7 +226,6 @@ async function getQuestionById(req, res, next) {
       WHERE question_id = ?
       ORDER BY display_order ASC
     `, [id]);
-
 
     // Check user interaction status
     let userHasVoted = false;
@@ -265,6 +266,12 @@ async function getQuestionById(req, res, next) {
         programName: question.program_name,
         programSlug: question.program_slug,
         programIcon: question.program_icon,
+        courseId: question.program_id,
+        courseName: question.program_name,
+        courseSlug: question.program_slug,
+        courseIcon: question.program_icon,
+        courseType: question.program_course_type || 'CODING',
+        imageUrl: question.program_image_url || null,
         allowedCompilers,
         languageId: question.language_id,
         languageName: question.language_name,
@@ -302,36 +309,27 @@ async function createQuestion(req, res, next) {
       output_format,
       constraints_text,
       explanation = '',
+      course_id,
+      program_id,
       language_id,
       level_id,
-      samples,
-      test_cases,
+      samples = [],
+      test_cases = [],
       starter_code = null
     } = req.body;
 
-    // Verify language exists and is enabled
-    const langRows = await db.query(
-      'SELECT id, slug FROM languages WHERE id = ? AND enabled = TRUE',
-      [language_id]
-    );
-    if (!langRows || langRows.length === 0) {
+    if (!title || typeof title !== 'string' || title.trim().length < 5 || title.trim().length > 200) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid or disabled programming language selected.'
+        error: 'Question title must be between 5 and 200 characters.'
       });
     }
 
-    // Verify compiler ID if provided matches the language's expected Judge0 compiler ID
-    const langSlug = langRows[0].slug.toLowerCase();
-    const expectedConfig = LANGUAGE_CONFIG[langSlug];
-    if (req.body.compiler_id && expectedConfig) {
-      const providedCompilerId = parseInt(req.body.compiler_id, 10);
-      if (providedCompilerId !== expectedConfig.judge0Id) {
-        return res.status(400).json({
-          success: false,
-          error: `Compiler mismatch: The selected language requires compiler '${expectedConfig.displayName}' (Judge0 ID ${expectedConfig.judge0Id}). Received ID ${providedCompilerId}.`
-        });
-      }
+    if (!statement || typeof statement !== 'string' || statement.trim().length < 10) {
+      return res.status(400).json({
+        success: false,
+        error: 'Question statement must be at least 10 characters long.'
+      });
     }
 
     // Verify level exists
@@ -347,22 +345,105 @@ async function createQuestion(req, res, next) {
     }
 
     const targetLevel = levelRows[0];
-    let resolvedProgramId = req.body.program_id ? parseInt(req.body.program_id, 10) : targetLevel.program_id || null;
+    const resolvedProgramId = course_id ? parseInt(course_id, 10) : (program_id ? parseInt(program_id, 10) : targetLevel.program_id || null);
 
-    // Prevent cross-program level assignment!
+    // Prevent cross-course / cross-program level assignment!
     if (resolvedProgramId && targetLevel.program_id && targetLevel.program_id !== resolvedProgramId) {
       return res.status(400).json({
         success: false,
-        error: 'Cannot assign question to a level from another program.'
+        error: 'Cannot assign question to a level from another course.'
       });
     }
 
-    if (targetLevel.language_id && language_id && targetLevel.language_id !== parseInt(language_id, 10)) {
+    // Fetch Course details if assigned
+    let course = null;
+    let allowedCourseLanguages = [];
+    if (resolvedProgramId) {
+      const cRows = await db.query('SELECT id, name, course_type FROM programs WHERE id = ?', [resolvedProgramId]);
+      if (cRows && cRows.length > 0) {
+        course = cRows[0];
+        const plRows = await db.query(`
+          SELECT pl.language_id, l.slug, l.name
+          FROM program_languages pl
+          JOIN languages l ON pl.language_id = l.id
+          WHERE pl.program_id = ?
+        `, [resolvedProgramId]);
+        allowedCourseLanguages = plRows;
+      }
+    }
+
+    const isTheory = course && course.course_type === 'THEORY';
+
+    // Verify language if provided
+    let resolvedLanguageId = language_id ? parseInt(language_id, 10) : null;
+    if (resolvedLanguageId) {
+      const langRows = await db.query(
+        'SELECT id, slug FROM languages WHERE id = ? AND enabled = TRUE',
+        [resolvedLanguageId]
+      );
+      if (!langRows || langRows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid or disabled programming language selected.'
+        });
+      }
+
+      // If course defines allowed compilers, verify selected language is one of them
+      if (allowedCourseLanguages.length > 0) {
+        const isPermitted = allowedCourseLanguages.some(l => l.language_id === resolvedLanguageId);
+        if (!isPermitted) {
+          return res.status(400).json({
+            success: false,
+            error: 'The selected programming language is not permitted for this course.'
+          });
+        }
+      }
+
+      // Compiler check if provided
+      const langSlug = langRows[0].slug.toLowerCase();
+      const expectedConfig = LANGUAGE_CONFIG[langSlug];
+      if (req.body.compiler_id && expectedConfig) {
+        const providedCompilerId = parseInt(req.body.compiler_id, 10);
+        if (providedCompilerId !== expectedConfig.judge0Id) {
+          return res.status(400).json({
+            success: false,
+            error: `Compiler mismatch: The selected language requires compiler '${expectedConfig.displayName}' (Judge0 ID ${expectedConfig.judge0Id}). Received ID ${providedCompilerId}.`
+          });
+        }
+      }
+    } else if (!isTheory && !resolvedProgramId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Programming language is required.'
+      });
+    }
+
+    if (targetLevel.language_id && resolvedLanguageId && targetLevel.language_id !== resolvedLanguageId) {
       return res.status(400).json({
         success: false,
         error: 'Selected level does not belong to the selected programming language.'
       });
     }
+
+    // For coding questions, validate samples & test cases
+    if (!isTheory) {
+      if (!Array.isArray(samples) || samples.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'At least one sample input/output case is required for coding questions.'
+        });
+      }
+      if (!Array.isArray(test_cases) || test_cases.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'At least one hidden evaluation test case is required for coding questions.'
+        });
+      }
+    }
+
+    const cleanInputFormat = input_format ? String(input_format).trim() : (isTheory ? 'N/A' : '');
+    const cleanOutputFormat = output_format ? String(output_format).trim() : (isTheory ? 'N/A' : '');
+    const cleanConstraints = constraints_text ? String(constraints_text).trim() : (isTheory ? 'N/A' : '');
 
     // Use transaction to insert question and all related samples, test cases, and starter code
     const createdQuestionId = await db.withTransaction(async (conn) => {
@@ -373,29 +454,33 @@ async function createQuestion(req, res, next) {
           contributor_id, status
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
       `, [
-        resolvedProgramId, title, statement, input_format, output_format, constraints_text,
-        explanation, language_id, level_id,
+        resolvedProgramId, title.trim(), statement.trim(), cleanInputFormat, cleanOutputFormat, cleanConstraints,
+        explanation ? explanation.trim() : '', resolvedLanguageId, level_id,
         userId
       ]);
 
       const qId = insertRes.insertId;
 
       // Insert visible samples
-      for (let i = 0; i < samples.length; i++) {
-        const s = samples[i];
-        await conn.query(`
-          INSERT INTO question_samples (question_id, sample_input, expected_output, explanation, display_order)
-          VALUES (?, ?, ?, ?, ?)
-        `, [qId, s.sample_input || '', s.expected_output || '', s.explanation || '', i + 1]);
+      if (Array.isArray(samples)) {
+        for (let i = 0; i < samples.length; i++) {
+          const s = samples[i];
+          await conn.query(`
+            INSERT INTO question_samples (question_id, sample_input, expected_output, explanation, display_order)
+            VALUES (?, ?, ?, ?, ?)
+          `, [qId, s.sample_input || '', s.expected_output || '', s.explanation || '', i + 1]);
+        }
       }
 
       // Insert private/hidden test cases
-      for (let i = 0; i < test_cases.length; i++) {
-        const tc = test_cases[i];
-        await conn.query(`
-          INSERT INTO question_test_cases (question_id, test_input, expected_output, is_hidden, display_order)
-          VALUES (?, ?, ?, ?, ?)
-        `, [qId, tc.test_input || '', tc.expected_output || '', tc.is_hidden !== false, i + 1]);
+      if (Array.isArray(test_cases)) {
+        for (let i = 0; i < test_cases.length; i++) {
+          const tc = test_cases[i];
+          await conn.query(`
+            INSERT INTO question_test_cases (question_id, test_input, expected_output, is_hidden, display_order)
+            VALUES (?, ?, ?, ?, ?)
+          `, [qId, tc.test_input || '', tc.expected_output || '', tc.is_hidden !== false, i + 1]);
+        }
       }
 
       // Insert starter code if provided

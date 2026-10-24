@@ -17,7 +17,7 @@ router.patch('/questions/:id/remove', adminController.removeQuestion);
 router.patch('/questions/:id/restore', adminController.restoreQuestion);
 router.get('/questions/audit/all', adminController.getAuditHistory);
 
-// Program Management routes
+// Course & Program Management routes
 router.get('/programs', adminController.getPrograms);
 router.post('/programs', adminController.createProgram);
 router.get('/programs/:id', adminController.getProgramById);
@@ -25,12 +25,25 @@ router.patch('/programs/:id', adminController.updateProgram);
 router.put('/programs/:id', adminController.updateProgram);
 router.delete('/programs/:id', adminController.deleteProgram);
 
-// Program-specific Level Management routes
+router.get('/courses', adminController.getPrograms);
+router.post('/courses', adminController.createProgram);
+router.get('/courses/:id', adminController.getProgramById);
+router.patch('/courses/:id', adminController.updateProgram);
+router.put('/courses/:id', adminController.updateProgram);
+router.delete('/courses/:id', adminController.deleteProgram);
+
+// Course / Program Level Management routes
 router.get('/programs/:programId/levels', adminController.getProgramLevels);
 router.post('/programs/:programId/levels', adminController.createProgramLevel);
 router.patch('/programs/:programId/levels/:levelId', adminController.updateProgramLevel);
 router.put('/programs/:programId/levels/:levelId', adminController.updateProgramLevel);
 router.delete('/programs/:programId/levels/:levelId', adminController.deleteProgramLevel);
+
+router.get('/courses/:programId/levels', adminController.getProgramLevels);
+router.post('/courses/:programId/levels', adminController.createProgramLevel);
+router.patch('/courses/:programId/levels/:levelId', adminController.updateProgramLevel);
+router.put('/courses/:programId/levels/:levelId', adminController.updateProgramLevel);
+router.delete('/courses/:programId/levels/:levelId', adminController.deleteProgramLevel);
 
 // User Management routes
 router.get('/users', adminController.getUsers);

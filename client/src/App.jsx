@@ -45,6 +45,8 @@ export function App() {
       {/* Main Application Pages with Responsive Left Sidebar */}
       <Route element={<MainLayout />}>
         {/* Practice Curriculum & Workspace Routes */}
+        <Route path="/courses" element={<LanguageSelectPage />} />
+        <Route path="/courses/:courseSlug/levels" element={<LevelOverviewPage />} />
         <Route path="/languages" element={<LanguageSelectPage />} />
         <Route path="/languages/:languageSlug/levels" element={<LevelOverviewPage />} />
         <Route path="/programs/:programSlug/levels" element={<LevelOverviewPage />} />
@@ -104,6 +106,7 @@ export function App() {
         >
           <Route index element={<AdminDashboardPage />} />
           <Route path="questions" element={<AdminQuestionsPage />} />
+          <Route path="courses" element={<AdminProgramsPage />} />
           <Route path="programs" element={<AdminProgramsPage />} />
           <Route path="users" element={<AdminUsersPage />} />
           <Route path="levels" element={<AdminLevelsPage />} />

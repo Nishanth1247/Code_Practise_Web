@@ -70,10 +70,10 @@ export function UploadQuestionPage() {
     async function fetchMeta() {
       try {
         const [progRes, langRes] = await Promise.all([
-          api.get('/programs'),
+          api.get('/courses'),
           api.get('/languages')
         ]);
-        const progs = progRes.data.programs || [];
+        const progs = progRes.data.courses || progRes.data.programs || [];
         const langs = langRes.data.languages || [];
         setPrograms(progs);
         setLanguages(langs);
@@ -90,6 +90,24 @@ export function UploadQuestionPage() {
     fetchMeta();
   }, []);
 
+  // Selected course object and theory detection
+  const selectedCourse = programs.find(p => p.id === parseInt(programId, 10));
+  const isTheoryCourse = selectedCourse && (selectedCourse.courseType === 'THEORY' || selectedCourse.course_type === 'THEORY');
+  const allowedCompilers = selectedCourse?.compilers || [];
+  const availableLanguages = selectedCourse && !isTheoryCourse && allowedCompilers.length > 0
+    ? languages.filter(l => allowedCompilers.some(c => c.language_id === l.id || c.language_slug === l.slug))
+    : languages;
+
+  // Auto-switch language if current language is not permitted in selected course
+  useEffect(() => {
+    if (!isTheoryCourse && availableLanguages.length > 0) {
+      const isCurrentValid = availableLanguages.some(l => l.id === parseInt(languageId, 10));
+      if (!isCurrentValid) {
+        setLanguageId(availableLanguages[0].id);
+      }
+    }
+  }, [programId, availableLanguages, isTheoryCourse, languageId]);
+
   // Load levels whenever programId or languageId changes
   useEffect(() => {
     async function fetchLevels() {
@@ -97,8 +115,8 @@ export function UploadQuestionPage() {
         const targetProg = programs.find(p => p.id === parseInt(programId, 10));
         if (targetProg) {
           try {
-            const res = await api.get(`/programs/${targetProg.slug}`);
-            const lvls = res.data.levels || [];
+            const res = await api.get(`/courses/${targetProg.slug}`);
+            const lvls = res.data.course?.levels || res.data.levels || [];
             setLevels(lvls);
             if (lvls.length > 0) {
               setLevelId(lvls[0].id);
@@ -278,17 +296,22 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
     try {
       const payload = {
         title,
+        course_id: programId ? parseInt(programId, 10) : undefined,
         program_id: programId ? parseInt(programId, 10) : undefined,
-        language_id: parseInt(languageId, 10),
+        language_id: isTheoryCourse && !languageId ? null : parseInt(languageId, 10),
         level_id: parseInt(levelId, 10),
-        compiler_id: currentCompiler.judge0Id,
+        compiler_id: isTheoryCourse ? null : currentCompiler.judge0Id,
         statement,
-        input_format: inputFormat,
-        output_format: outputFormat,
-        constraints_text: constraintsText,
+        input_format: inputFormat.trim() || (isTheoryCourse ? 'N/A' : ''),
+        output_format: outputFormat.trim() || (isTheoryCourse ? 'N/A' : ''),
+        constraints_text: constraintsText.trim() || (isTheoryCourse ? 'N/A' : ''),
         explanation,
-        samples,
-        test_cases: testCases,
+        samples: isTheoryCourse
+          ? samples.filter(s => (s.sample_input || '').trim() || (s.expected_output || '').trim())
+          : samples,
+        test_cases: isTheoryCourse
+          ? testCases.filter(t => (t.test_input || '').trim() || (t.expected_output || '').trim())
+          : testCases,
         starter_code: null
       };
 
@@ -554,17 +577,24 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Section 1: Track & Level Selection with Automatic Compiler Selection */}
+            {/* Section 1: Course & Level Selection with Automatic Compiler Selection */}
             <div className="p-6 bg-white border border-[#DBEAFE] rounded-2xl space-y-5 shadow-sm">
               <div className="flex items-center justify-between">
-                <h3 className="text-base font-bold text-[#1E3A8A]">1. Track & Level Selection</h3>
+                <div>
+                  <h3 className="text-base font-bold text-[#1E3A8A]">1. Practice Course & Level Selection</h3>
+                  {isTheoryCourse && (
+                    <span className="text-xs text-purple-700 font-semibold mt-0.5 inline-block">
+                      Theory Track: Conceptual & algorithmic problems. Code execution is not required.
+                    </span>
+                  )}
+                </div>
                 <span className="text-xs text-[#64748B]">Step 1 of 4</span>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
-                    Program Track
+                    Practice Course *
                   </label>
                   <select
                     value={programId}
@@ -572,21 +602,24 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
                     className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-[#172554] text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
                   >
                     {programs.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
+                      <option key={p.id} value={p.id}>
+                        {p.name} {p.courseType === 'THEORY' || p.course_type === 'THEORY' ? '(Theory)' : ''}
+                      </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
-                    Programming Language *
+                    Programming Language {isTheoryCourse ? '(Optional for Theory)' : '*'}
                   </label>
                   <select
                     value={languageId}
                     onChange={(e) => setLanguageId(e.target.value)}
                     className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-[#172554] text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
                   >
-                    {languages.map((l) => (
+                    {isTheoryCourse && <option value="">No language (Theory Problem)</option>}
+                    {availableLanguages.map((l) => (
                       <option key={l.id} value={l.id}>{l.name}</option>
                     ))}
                   </select>
@@ -610,7 +643,7 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
                 </div>
               </div>
 
-              {/* Automatic Compiler Runtime Indicator (Read-only, derived automatically from language) */}
+              {/* Automatic Compiler Runtime Indicator (Read-only) */}
               <div className="p-4 bg-[#F8FAFC] border border-[#CBD5E1] rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-50 text-[#2563EB] rounded-lg border border-blue-200 shrink-0">
@@ -618,21 +651,34 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
                   </div>
                   <div>
                     <div className="text-[11px] text-[#64748B] font-bold uppercase tracking-wider">
-                      Automated Compiler Runtime
+                      {isTheoryCourse ? 'Conceptual Curriculum' : 'Automated Compiler Runtime'}
                     </div>
-                    <div className="text-sm font-bold text-[#1E3A8A] flex items-center gap-2 flex-wrap">
-                      <span>{currentCompiler.label}</span>
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#DBEAFE] text-[#1E3A8A] font-mono font-semibold">
-                        Judge0 ID: {currentCompiler.judge0Id}
-                      </span>
-                    </div>
+                    {isTheoryCourse ? (
+                      <div className="text-sm font-bold text-purple-900">
+                        Theory Course — No Judge0 runtime or execution required
+                      </div>
+                    ) : (
+                      <div className="text-sm font-bold text-[#1E3A8A] flex items-center gap-2 flex-wrap">
+                        <span>{currentCompiler.label}</span>
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#DBEAFE] text-[#1E3A8A] font-mono font-semibold">
+                          Judge0 ID: {currentCompiler.judge0Id}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="text-xs text-[#64748B]">
-                  <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 font-medium">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    Auto-configured for {selectedLangObj?.name || 'language'}
-                  </span>
+                  {isTheoryCourse ? (
+                    <span className="inline-flex items-center gap-1.5 text-purple-700 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-200 font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />
+                      Theory-only practice
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      Auto-configured for {selectedLangObj?.name || 'language'}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -672,28 +718,28 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
-                  Input Format *
+                  Input Format {isTheoryCourse ? '(Optional for Theory)' : '*'}
                 </label>
                 <textarea
-                  required
+                  required={!isTheoryCourse}
                   rows={3}
                   value={inputFormat}
                   onChange={(e) => setInputFormat(e.target.value)}
-                  placeholder="Describe inputs (e.g. An integer N followed by N numbers)"
+                  placeholder={isTheoryCourse ? 'Optional input description...' : 'Describe inputs (e.g. An integer N followed by N numbers)'}
                   className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl p-2.5 text-[#172554] text-xs focus:outline-none focus:ring-2 focus:ring-[#2563EB] font-sans"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
-                  Output Format *
+                  Output Format {isTheoryCourse ? '(Optional for Theory)' : '*'}
                 </label>
                 <textarea
-                  required
+                  required={!isTheoryCourse}
                   rows={3}
                   value={outputFormat}
                   onChange={(e) => setOutputFormat(e.target.value)}
-                  placeholder="Describe expected output formatting..."
+                  placeholder={isTheoryCourse ? 'Optional output description...' : 'Describe expected output formatting...'}
                   className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl p-2.5 text-[#172554] text-xs focus:outline-none focus:ring-2 focus:ring-[#2563EB] font-sans"
                 />
               </div>
@@ -701,14 +747,14 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
 
             <div>
               <label className="block text-xs font-bold text-[#172554] uppercase mb-1.5">
-                Constraints *
+                Constraints {isTheoryCourse ? '(Optional for Theory)' : '*'}
               </label>
               <input
                 type="text"
-                required
+                required={!isTheoryCourse}
                 value={constraintsText}
                 onChange={(e) => setConstraintsText(e.target.value)}
-                placeholder="e.g. 1 <= N <= 10^5, -1000 <= A[i] <= 1000"
+                placeholder={isTheoryCourse ? 'Optional constraints' : 'e.g. 1 <= N <= 10^5, -1000 <= A[i] <= 1000'}
                 className="w-full bg-[#F5F9FF] border border-[#DBEAFE] rounded-xl px-3 py-2 text-[#1E3A8A] text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
               />
             </div>
@@ -730,7 +776,14 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
           {/* Section 3: Visible Samples */}
           <div className="p-6 bg-white border border-[#DBEAFE] rounded-2xl space-y-4 shadow-sm">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-[#1E3A8A]">3. Visible Sample Cases</h3>
+              <div>
+                <h3 className="text-base font-bold text-[#1E3A8A]">
+                  3. Visible Sample Cases {isTheoryCourse && <span className="text-xs text-purple-700 font-semibold">(Optional for Theory)</span>}
+                </h3>
+                <p className="text-xs text-[#64748B]">
+                  {isTheoryCourse ? 'Examples illustrating conceptual answers or walkthroughs.' : 'Sample inputs and expected outputs shown to learners.'}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={addSample}
@@ -790,9 +843,11 @@ Ensure all test case outputs are 100% accurate, properly formatted, and match th
           <div className="p-6 bg-white border border-[#DBEAFE] rounded-2xl space-y-4 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-bold text-[#1E3A8A]">4. Hidden Test Suite</h3>
+                <h3 className="text-base font-bold text-[#1E3A8A]">
+                  4. Hidden Test Suite {isTheoryCourse && <span className="text-xs text-purple-700 font-semibold">(Optional for Theory)</span>}
+                </h3>
                 <p className="text-xs text-[#64748B]">
-                  These test cases are evaluated during submission and never revealed to learners.
+                  {isTheoryCourse ? 'Hidden grading criteria or benchmark checks (optional for conceptual questions).' : 'These test cases are evaluated during submission and never revealed to learners.'}
                 </p>
               </div>
               <button

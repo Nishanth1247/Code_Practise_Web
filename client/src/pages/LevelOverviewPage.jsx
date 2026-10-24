@@ -34,8 +34,8 @@ const ICON_MAP = {
 };
 
 export function LevelOverviewPage() {
-  const { languageSlug, programSlug } = useParams();
-  const slug = programSlug || languageSlug;
+  const { languageSlug, programSlug, courseSlug } = useParams();
+  const slug = courseSlug || programSlug || languageSlug;
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -96,8 +96,8 @@ export function LevelOverviewPage() {
     return (
       <div className="max-w-7xl mx-auto px-4 py-16 text-center">
         <p className="text-rose-600 mb-4 font-semibold">{error || 'Curriculum track not found'}</p>
-        <Link to="/languages" className="text-[#2563EB] hover:underline text-xs font-bold inline-flex items-center gap-1.5">
-          <ArrowLeft className="w-4 h-4" /> Back to Practice Tracks
+        <Link to="/courses" className="text-[#2563EB] hover:underline text-xs font-bold inline-flex items-center gap-1.5">
+          <ArrowLeft className="w-4 h-4" /> Back to Courses
         </Link>
       </div>
     );
@@ -111,10 +111,10 @@ export function LevelOverviewPage() {
       {/* Back button & Header */}
       <div>
         <Link
-          to="/languages"
+          to="/courses"
           className="inline-flex items-center gap-1.5 text-xs text-[#64748B] hover:text-[#2563EB] mb-4 transition-colors font-bold"
         >
-          <ArrowLeft className="w-4 h-4" /> Back to Practice Tracks
+          <ArrowLeft className="w-4 h-4" /> Back to Courses
         </Link>
 
         <div className="p-8 rounded-3xl bg-white border border-[#DBEAFE] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">

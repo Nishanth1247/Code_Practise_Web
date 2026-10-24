@@ -393,6 +393,12 @@ export function PracticeWorkspacePage() {
             {question.title}
           </span>
 
+          {question.courseType === 'THEORY' && (
+            <span className="inline-flex items-center gap-1 text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200 font-bold text-[11px]">
+              Theory Course
+            </span>
+          )}
+
           {question.isSolved && (
             <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 font-bold text-[11px]">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Solved
@@ -567,27 +573,33 @@ export function PracticeWorkspacePage() {
           <div className="h-10 bg-[#F5F9FF] border-b border-[#DBEAFE] px-4 flex items-center justify-between shrink-0 text-xs">
             <div className="flex items-center gap-2">
               <span className="text-[#64748B] font-medium">Compiler:</span>
-              <select
-                value={selectedLanguage}
-                onChange={(e) => handleLanguageChange(e.target.value)}
-                className="font-bold text-[#2563EB] bg-white border border-[#DBEAFE] rounded-lg px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-                title="Select compiler runtime (clears editor on switch)"
-              >
-                {allowedCompilers && allowedCompilers.length > 0 ? (
-                  allowedCompilers.map((c) => (
-                    <option key={c.compilerId || c.languageSlug} value={c.languageSlug}>
-                      {c.compilerName || c.languageName}
-                    </option>
-                  ))
-                ) : (
-                  <>
-                    <option value="c">C (GCC 9.2.0)</option>
-                    <option value="cpp">C++ (GCC 9.2.0)</option>
-                    <option value="java">Java (OpenJDK 13)</option>
-                    <option value="python">Python (3.8.1)</option>
-                  </>
-                )}
-              </select>
+              {question.courseType === 'THEORY' ? (
+                <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                  Theory (No runtime needed)
+                </span>
+              ) : (
+                <select
+                  value={selectedLanguage}
+                  onChange={(e) => handleLanguageChange(e.target.value)}
+                  className="font-bold text-[#2563EB] bg-white border border-[#DBEAFE] rounded-lg px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                  title="Select compiler runtime (clears editor on switch)"
+                >
+                  {allowedCompilers && allowedCompilers.length > 0 ? (
+                    allowedCompilers.map((c) => (
+                      <option key={c.compilerId || c.languageSlug} value={c.languageSlug}>
+                        {c.compilerName || c.languageName}
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="c">C (GCC 9.2.0)</option>
+                      <option value="cpp">C++ (GCC 9.2.0)</option>
+                      <option value="java">Java (OpenJDK 13)</option>
+                      <option value="python">Python (3.8.1)</option>
+                    </>
+                  )}
+                </select>
+              )}
             </div>
 
             <div className="flex items-center gap-3">
@@ -665,25 +677,31 @@ export function PracticeWorkspacePage() {
               <span>Console & Results</span>
             </button>
 
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleRunCode}
-                disabled={isRunning || isSubmitting}
-                className="px-4 py-2 rounded-xl bg-[#F5F9FF] hover:bg-[#DBEAFE] border border-[#DBEAFE] text-[#1E3A8A] text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
-              >
-                <Play className="w-3.5 h-3.5 fill-current text-[#2563EB]" />
-                {isRunning ? 'Running...' : 'Run Code'}
-              </button>
+            {question.courseType === 'THEORY' ? (
+              <div className="flex items-center gap-2 text-xs font-semibold text-purple-700 bg-purple-50 px-3.5 py-1.5 rounded-xl border border-purple-200">
+                <span>Theory Question — No code execution required</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleRunCode}
+                  disabled={isRunning || isSubmitting}
+                  className="px-4 py-2 rounded-xl bg-[#F5F9FF] hover:bg-[#DBEAFE] border border-[#DBEAFE] text-[#1E3A8A] text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current text-[#2563EB]" />
+                  {isRunning ? 'Running...' : 'Run Code'}
+                </button>
 
-              <button
-                onClick={handleSubmitSolution}
-                disabled={isRunning || isSubmitting}
-                className="px-5 py-2 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
-              >
-                <Send className="w-3.5 h-3.5" />
-                {isSubmitting ? 'Evaluating...' : 'Submit Solution'}
-              </button>
-            </div>
+                <button
+                  onClick={handleSubmitSolution}
+                  disabled={isRunning || isSubmitting}
+                  className="px-5 py-2 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  {isSubmitting ? 'Evaluating...' : 'Submit Solution'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Execution Output Panel (Bottom split) */}

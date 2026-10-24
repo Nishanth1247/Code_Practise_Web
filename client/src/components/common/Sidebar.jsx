@@ -81,8 +81,13 @@ export function Sidebar({
     if (path === '/admin') {
       return location.pathname === '/admin';
     }
-    if (path === '/languages') {
+    if (path === '/admin/courses' || path === '/admin/programs') {
+      return location.pathname.startsWith('/admin/courses') || location.pathname.startsWith('/admin/programs');
+    }
+    if (path === '/courses' || path === '/languages') {
       return (
+        location.pathname === '/courses' ||
+        location.pathname.startsWith('/courses/') ||
         location.pathname === '/languages' ||
         location.pathname.startsWith('/languages/') ||
         location.pathname.startsWith('/programs/') ||
@@ -193,13 +198,13 @@ export function Sidebar({
             </Link>
 
             <Link
-              to="/languages"
+              to="/courses"
               onClick={() => isMobile && setMobileOpen && setMobileOpen(false)}
-              className={navItemClass('/languages')}
-              title="Practice Tracks"
+              className={navItemClass('/courses')}
+              title="Practice Courses"
             >
-              <Terminal className="w-4 h-4 shrink-0" />
-              {!isCol && <span>Practice</span>}
+              <BookOpen className="w-4 h-4 shrink-0" />
+              {!isCol && <span>Courses</span>}
             </Link>
 
             {isAuthenticated && (
@@ -280,13 +285,13 @@ export function Sidebar({
               </Link>
 
               <Link
-                to="/admin/programs"
+                to="/admin/courses"
                 onClick={() => isMobile && setMobileOpen && setMobileOpen(false)}
-                className={navItemClass('/admin/programs')}
-                title="Manage Programs"
+                className={navItemClass('/admin/courses')}
+                title="Manage Practice Courses"
               >
                 <BookOpen className="w-4 h-4 shrink-0" />
-                {!isCol && <span>Programs</span>}
+                {!isCol && <span>Courses</span>}
               </Link>
 
               <Link
